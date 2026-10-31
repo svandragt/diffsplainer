@@ -44,3 +44,12 @@ def test_every_language_app_js_maps_an_extension_to_has_a_grammar_in_prism():
     assert {"python", "javascript"} <= ids  # the map was found
     prism = (VENDOR / "prism.js").read_text()
     assert [i for i in sorted(ids) if not re.search(rf"languages\.{i}=", prism)] == []
+
+
+def test_filename_rules_exist_for_dockerfile_makefile_mk_and_env_variants():
+    js = (server.STATIC / "app.js").read_text()
+    rules = re.search(r"const NAME_LANGS = \[(.*?)\];", js, re.DOTALL).group(1)
+    for needle in ("Dockerfile", "'docker'", "Makefile", ".mk", "'makefile'", r"\.env\.", "'ini'"):
+        assert needle in rules
+    prism = (VENDOR / "prism.js").read_text()
+    assert [i for i in ("docker", "makefile", "ini") if not re.search(rf"languages\.{i}=", prism)] == []
