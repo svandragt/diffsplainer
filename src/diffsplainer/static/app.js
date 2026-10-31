@@ -2,7 +2,6 @@
 const $ = (s, el = document) => el.querySelector(s);
 const app = $('#app');
 const urlInput = $('#url');
-const prsInput = $('#prs');
 let source = null;
 let loadSeq = 0;
 
@@ -30,8 +29,6 @@ function parsePr(text) {
 function fromLocation() {
   closePop();
   const pr = parsePr(location.pathname);
-  const prs = new URLSearchParams(location.search).get('prs');
-  prsInput.value = prs ?? '3';
   if (!pr) {
     loadSeq++;
     if (source) source.close();
@@ -51,8 +48,7 @@ $('#load').addEventListener('submit', (e) => {
   e.preventDefault();
   const pr = parsePr(urlInput.value);
   if (!pr) return alert('Enter a GitHub pull request URL, e.g. https://github.com/owner/repo/pull/123');
-  const qs = prsInput.value !== '3' ? `?prs=${prsInput.value}` : '';
-  history.pushState(null, '', `/${pr.owner}/${pr.repo}/pull/${pr.num}${qs}`);
+  history.pushState(null, '', `/${pr.owner}/${pr.repo}/pull/${pr.num}${location.search}`);
   fromLocation();
 });
 window.addEventListener('popstate', fromLocation);
@@ -120,7 +116,8 @@ function renderChunk(c) {
 }
 
 function explain(owner, repo, num) {
-  source = new EventSource(`/api/explain/${owner}/${repo}/${num}?prs=${encodeURIComponent(prsInput.value || 0)}`);
+  const prs = new URLSearchParams(location.search).get('prs');
+  source = new EventSource(`/api/explain/${owner}/${repo}/${num}${prs === null ? '' : `?prs=${encodeURIComponent(prs)}`}`);
   const status = (msg) => msg && ($('#status').textContent = msg);
 
   source.addEventListener('status', (e) => {

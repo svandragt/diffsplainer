@@ -24,8 +24,6 @@ a { color: var(--accent); }
 #load { display: flex; flex: 1; gap: 8px; align-items: center; }
 #load input, #load button { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 #url { flex: 1; min-width: 0; font-family: var(--mono) !important; }
-#prs { width: 56px; }
-#load label { color: var(--muted); white-space: nowrap; font-size: 13px; }
 #load button { background: var(--accent); color: var(--bg); border-color: transparent; cursor: pointer; }
 
 main { max-width: 1600px; margin: 0 auto; padding: 16px; }
