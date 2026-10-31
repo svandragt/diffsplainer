@@ -32,6 +32,8 @@ Claude also gets the PR description, the project's instruction files (such as `C
 
 The app runs Claude Code without your own MCP servers, hooks, slash commands and `CLAUDE.md`, so each call stays small. Closing or reloading the page stops the Claude calls it started.
 
+To look up a word or phrase in an explanation, select it and click **Explain**. A popup shows what it means in general and what it does in this PR.
+
 Opening the same PR again reuses the explanations while its commits stay the same. The app drops them when it restarts, or when it makes room for newer PRs (it keeps 50). Editing the PR title or description does not refresh them.
 
 PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGED_LINES` to change the limit.

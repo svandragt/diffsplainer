@@ -17,7 +17,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import github as gh
-from .claude import ClaudeCancelled, explain_file, explain_overview
+from .claude import (
+    ClaudeCancelled,
+    ClaudeError,
+    explain_file,
+    explain_overview,
+    explain_term,
+)
 from .context import project_instructions, related_pulls
 from .diff import chunk_files
 
@@ -30,14 +36,19 @@ BATCH_LINES = 400
 PR_TTL_S = 60
 PR_CACHE_SIZE = 50
 EXPLAIN_CACHE_SIZE = 50
+TERM_CACHE_SIZE = 200
+MAX_TERM_CHARS = 300
+MAX_AROUND_CHARS = 4000
 WATCH_INTERVAL_S = 0.5
 STATIC = Path(__file__).parent / "static"
 
 PR_RE = re.compile(r"^/api/pr/([\w.-]+)/([\w.-]+)/(\d+)$")
 EXPLAIN_RE = re.compile(r"^/api/explain/([\w.-]+)/([\w.-]+)/(\d+)$")
+TERM_RE = re.compile(r"^/api/explain-term/([\w.-]+)/([\w.-]+)/(\d+)$")
 
 _pr_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _explain_cache: OrderedDict[str, list] = OrderedDict()
+_term_cache: OrderedDict[tuple, dict] = OrderedDict()
 _cache_lock = threading.Lock()
 
 
@@ -120,7 +131,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # quieter logs: skip static assets
         if "/api/" in self.path:
-            super().log_message(fmt, *args)
+            # the query string holds the selected text and paragraph from private PRs
+            super().log_message(fmt, *(re.sub(r"\?\S*", "", a) if isinstance(a, str) else a for a in args))
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -133,6 +145,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 prs = 3
             return self.api_explain(m[1], m[2], int(m[3]), max(0, min(MAX_PRS, prs)))
+        if m := TERM_RE.match(path):
+            return self.api_explain_term(m[1], m[2], int(m[3]), parse_qs(url.query))
         return self.static(path)
 
     # --- helpers -------------------------------------------------------
@@ -167,6 +181,54 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return self.send_json(500, {"error": str(e)})
         self.send_json(200, {k: v for k, v in data.items() if k != "_raw"})
+
+    def api_explain_term(self, owner: str, repo: str, num: int, query: dict):
+        text = query.get("text", [""])[0].strip()
+        around = query.get("around", [""])[0]
+        chunk_id = query.get("chunk", [None])[0]
+        if not text or len(text) > MAX_TERM_CHARS:
+            return self.send_json(400, {"error": f"text must be 1 to {MAX_TERM_CHARS} characters"})
+        if len(around) > MAX_AROUND_CHARS:
+            return self.send_json(400, {"error": f"around must be at most {MAX_AROUND_CHARS} characters"})
+        try:
+            data = load_pr(owner, repo, num)
+        except gh.GitHubError as e:
+            return self.send_json(e.status, {"error": str(e)})
+        except Exception as e:
+            return self.send_json(500, {"error": str(e)})
+        chunk = None
+        if chunk_id is not None:
+            chunk = next((c for f in data["files"] for c in f["chunks"] if c["id"] == chunk_id), None)
+            if chunk is None:
+                return self.send_json(404, {"error": f"Unknown chunk {chunk_id}"})
+        key = (owner, repo, num, data["pr"]["baseSha"], data["pr"]["headSha"], chunk_id or "", text, around)
+        with _cache_lock:
+            answer = _term_cache.get(key)
+            if answer:
+                _term_cache.move_to_end(key)
+        if answer:
+            return self.send_json(200, answer)
+
+        gone, stop = threading.Event(), threading.Event()
+        threading.Thread(target=watch_disconnect, args=(self.connection, gone, stop), daemon=True).start()
+        try:
+            answer = explain_term({"pr": data["pr"], "files": data["files"]}, chunk, text, around, gone)
+        except ClaudeCancelled:
+            return
+        except ClaudeError as e:
+            return self.send_json(502, {"error": str(e)})
+        except Exception as e:
+            return self.send_json(502, {"error": str(e)})
+        finally:
+            stop.set()
+        with _cache_lock:
+            _term_cache[key] = answer
+            while len(_term_cache) > TERM_CACHE_SIZE:
+                _term_cache.popitem(last=False)
+        try:
+            self.send_json(200, answer)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def api_explain(self, owner: str, repo: str, num: int, pr_limit: int):
         self.send_response(200)
