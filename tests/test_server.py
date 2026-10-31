@@ -101,9 +101,11 @@ def test_pr_cache_drops_least_recently_used_entry(monkeypatch):
     server._pr_cache.clear()
     _stub_github(monkeypatch)
     monkeypatch.setattr(server, "PR_CACHE_SIZE", 2)
-    for num in (1, 2, 3):
+    for num in (1, 2):
         server.load_pr("o", "r", num)
-    assert list(server._pr_cache) == ["o/r/2", "o/r/3"]
+    server.load_pr("o", "r", 1)  # cache hit moves PR 1 to the end
+    server.load_pr("o", "r", 3)
+    assert list(server._pr_cache) == ["o/r/1", "o/r/3"]
 
 
 def test_pr_cache_drops_expired_entry_when_seen(monkeypatch):
