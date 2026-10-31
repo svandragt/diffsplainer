@@ -119,6 +119,72 @@ def test_explain_calls_pass_cancel_to_run_claude(monkeypatch):
     assert seen == [cancel, cancel]
 
 
+def test_term_schema_asks_for_general_meaning_and_meaning_here():
+    props = claude.TERM_SCHEMA["properties"]
+    assert claude.TERM_SCHEMA["required"] == ["meaning", "here"]
+    assert props["meaning"] == {
+        "type": "string",
+        "description": (
+            "What the selected term or phrase means in general, for someone who has never met it. "
+            "One or two sentences, plain language."
+        ),
+    }
+    assert props["here"] == {
+        "type": "string",
+        "description": "What it does in this pull request, in one sentence.",
+    }
+
+
+def _capture_prompt(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(claude, "run_claude", lambda prompt, schema, cancel=None: seen.update(prompt=prompt, schema=schema, cancel=cancel))
+    return seen
+
+
+def test_explain_term_prompt_holds_the_chunk_paragraph_and_selection_but_no_project_context(monkeypatch):
+    seen = _capture_prompt(monkeypatch)
+    ctx = {
+        **CTX,
+        "pr": {**CTX["pr"], "title": "Cache feeds", "body": "Send conditional requests."},
+        "instructions": [{"path": "AGENTS.md", "body": "SECRET-INSTRUCTIONS"}],
+        "related": [{"number": 9, "title": "SECRET-RELATED", "merged_at": "", "files": [], "body": ""}],
+    }
+    cancel = threading.Event()
+    claude.explain_term(ctx, FILE["chunks"][0], "conditional GET", "Sends a conditional GET on refresh.", cancel)
+    prompt = seen["prompt"]
+    assert prompt.startswith(claude.SYSTEM)
+    assert "Cache feeds" in prompt and "Send conditional requests." in prompt
+    assert '<chunk id="c0">' in prompt and claude.to_text([LINE]) in prompt
+    assert "<paragraph>\nSends a conditional GET on refresh.\n</paragraph>" in prompt
+    assert "<selection>\nconditional GET\n</selection>" in prompt
+    assert "SECRET-INSTRUCTIONS" not in prompt and "SECRET-RELATED" not in prompt
+    assert seen["schema"] is claude.TERM_SCHEMA
+    assert seen["cancel"] is cancel
+
+
+def test_explain_term_without_a_chunk_leaves_out_the_diff(monkeypatch):
+    seen = _capture_prompt(monkeypatch)
+    claude.explain_term(CTX, None, "term", "paragraph")
+    assert "<chunk id=" not in seen["prompt"]
+    assert "<selection>\nterm\n</selection>" in seen["prompt"]
+
+
+def test_fake_claude_answers_each_schema_the_app_sends(fake):
+    term = claude.explain_term(CTX, None, "term", "paragraph")
+    chunks = claude.explain_file(CTX, FILE)
+    overview = claude.explain_overview(CTX, [FILE])
+    assert term == {"meaning": "Fake meaning.", "here": "Fake here."}
+    assert [c["id"] for c in chunks["chunks"]] == ["c0"]
+    assert {"title", "what", "why", "concern"} <= set(chunks["chunks"][0])
+    assert set(overview) == {"summary", "approach", "review_focus"} and len(overview["review_focus"]) == 1
+
+
+def test_fake_claude_runs_without_a_record_file(monkeypatch):
+    monkeypatch.setattr(claude, "CLAUDE_BIN", str(FAKE))
+    monkeypatch.delenv("FAKE_CLAUDE_RECORD", raising=False)
+    assert claude.explain_term(CTX, None, "term", "paragraph") == {"meaning": "Fake meaning.", "here": "Fake here."}
+
+
 def test_private_cwd_is_recreated_after_it_is_deleted(monkeypatch):
     monkeypatch.setattr(claude, "_cwd", None)
     first = claude._private_cwd()

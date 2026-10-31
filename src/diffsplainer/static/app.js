@@ -19,6 +19,7 @@ function parsePr(text) {
 }
 
 function fromLocation() {
+  closePop();
   const pr = parsePr(location.pathname);
   const prs = new URLSearchParams(location.search).get('prs');
   prsInput.value = prs ?? '3';
@@ -171,5 +172,96 @@ function explain(owner, repo, num) {
     });
   });
 }
+
+// Explain a term: selecting text in an explanation offers a button, then a popup with the answer.
+// One floating element (button, notice or popup) exists at a time.
+let pop = null;
+let popAbort = null;
+let popOpener = null;
+const make = (html) => {
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  return t.content.firstElementChild;
+};
+
+// Just below the end of the selection (document coordinates), kept inside the viewport.
+function place(el, a) {
+  const gap = 8;
+  const maxLeft = scrollX + document.documentElement.clientWidth - el.offsetWidth - gap;
+  el.style.left = `${Math.max(scrollX + gap, Math.min(a.x, maxLeft))}px`;
+  let top = a.bottom + 6;
+  if (top + el.offsetHeight > scrollY + innerHeight - gap) top = Math.max(scrollY + gap, a.top - el.offsetHeight - 6);
+  el.style.top = `${top}px`;
+}
+
+function mount(el, a) {
+  pop?.remove();
+  pop = el;
+  document.body.append(el);
+  place(el, a);
+}
+
+function closePop() {
+  if (!pop) return;
+  popAbort?.abort();
+  popAbort = null;
+  const hadFocus = pop.contains(document.activeElement);
+  pop.remove();
+  pop = null;
+  if (hadFocus) popOpener?.focus();
+}
+
+async function askTerm({ text, around, chunk }, a) {
+  const { owner, repo, num } = parsePr(location.pathname);
+  const dlg = make(`<div class="term-float term-pop" role="dialog" aria-label="Explanation of the selected text" aria-live="polite" tabindex="-1">
+    <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton short"></div></div>`);
+  mount(dlg, a);
+  dlg.focus({ preventScroll: true });
+  const ctl = (popAbort = new AbortController());
+  const q = new URLSearchParams({ text, around });
+  if (chunk) q.set('chunk', chunk);
+  try {
+    const res = await fetch(`/api/explain-term/${owner}/${repo}/${num}?${q}`, { signal: ctl.signal });
+    const d = await res.json();
+    dlg.innerHTML = res.ok
+      ? `<p><span class="lbl">Meaning</span>${md(d.meaning)}</p><p><span class="lbl">Here</span>${md(d.here)}</p>`
+      : `<p class="err">${esc(d.error || `Error ${res.status}`)}</p>`;
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    dlg.innerHTML = `<p class="err">${esc(err.message)}</p>`;
+  }
+  place(dlg, a);
+}
+
+function onSelect(e) {
+  if (e.type === 'keyup' && !(e.shiftKey || e.key === 'Shift')) return; // only keys that extend a selection
+  closePop();
+  popOpener = document.activeElement === document.body ? null : document.activeElement;
+  const sel = getSelection();
+  const text = sel.toString().trim();
+  if (!text) return;
+  const range = sel.getRangeAt(0);
+  const node = range.commonAncestorContainer;
+  const inner = node.nodeType === 1 ? node : node.parentElement;
+  const host = inner?.closest('.explain, #overview'); // a range that starts and ends in different hosts has a common ancestor outside both
+  if (!host) return;
+  const rects = range.getClientRects();
+  const end = rects[rects.length - 1] || range.getBoundingClientRect();
+  const a = { x: end.right + scrollX, top: end.top + scrollY, bottom: end.bottom + scrollY };
+  if (text.length > 300) return mount(make('<div class="term-float term-note" role="status">Select less text</div>'), a);
+  const btn = make('<button class="term-float term-btn">Explain</button>');
+  const around = (inner.closest('p') || host).textContent.replace(/\s+/g, ' ').trim();
+  btn.addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
+  btn.addEventListener('click', () => askTerm({ text, around, chunk: host.closest('.row')?.id }, a));
+  mount(btn, a);
+}
+
+// Deferred so a click that clears the selection is seen as empty. The popup check runs first:
+// by the time the deferred call runs, a clicked button has already been replaced by the popup.
+const onUp = (e) => pop?.contains(e.target) || setTimeout(onSelect, 0, e);
+document.addEventListener('mouseup', onUp);
+document.addEventListener('keyup', onUp);
+document.addEventListener('mousedown', (e) => pop && !pop.contains(e.target) && closePop());
+document.addEventListener('keydown', (e) => e.key === 'Escape' && closePop());
 
 fromLocation();
