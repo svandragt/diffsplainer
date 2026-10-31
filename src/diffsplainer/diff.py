@@ -47,13 +47,7 @@ def parse_hunks(patch: str) -> list[dict]:
 def _starts_block(prev: dict | None, line: dict) -> bool:
     """True when `line` starts a new top-level block (unindented, after a blank line)."""
     s = line["s"]
-    return (
-        prev is not None
-        and prev["s"].strip() == ""
-        and s.strip() != ""
-        and not s[0].isspace()
-        and s[0] not in ")}]"
-    )
+    return prev is not None and prev["s"].strip() == "" and s.strip() != "" and not s[0].isspace() and s[0] not in ")}]"
 
 
 def split_hunk(lines: list[dict]) -> list[list[dict]]:

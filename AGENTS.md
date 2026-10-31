@@ -4,14 +4,14 @@ Guidance to coding agents working in this repository.
 
 ## Project
 
-diffsplainer is a GitHub PR review app. It shows a PR's diff as chunks, with an explanation from a headless Claude Code run next to each chunk. At runtime the backend uses only the Python 3.11+ standard library. The browser UI is plain HTML, CSS and JavaScript in `src/diffsplainer/static/`. pytest is the only dependency, in the `dev` group. Do not add runtime dependencies.
+diffsplainer is a GitHub PR review app. It shows a PR's diff as chunks, with an explanation from a headless Claude Code run next to each chunk. At runtime the backend uses only the Python 3.11+ standard library. The browser UI is plain HTML, CSS and JavaScript in `src/diffsplainer/static/`. pytest and ruff are the dev dependencies, in the `dev` group. Do not add runtime dependencies.
 
 ## Commands
 
 - Run the app: `uv run diffsplainer`. The README lists the environment variables.
 - Run the tests: `uv run pytest`.
 - Check syntax: `uv run python -m compileall -q src`.
-- Lint: `uvx ruff check src tests`.
+- Lint and format: `uv run ruff check` and `uv run ruff format`.
 
 ## Tests
 

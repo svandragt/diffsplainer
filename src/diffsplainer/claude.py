@@ -229,9 +229,9 @@ def explain_file(ctx: dict, file: dict, cancel: threading.Event | None = None) -
 
 
 def explain_overview(ctx: dict, files: list[dict], cancel: threading.Event | None = None) -> dict:
-    sample = "\n".join(
-        f"--- {f['filename']}\n{to_text(c['lines'])[:1500]}" for f in files for c in f["chunks"][:3]
-    )[:30000]
+    sample = "\n".join(f"--- {f['filename']}\n{to_text(c['lines'])[:1500]}" for f in files for c in f["chunks"][:3])[
+        :30000
+    ]
     prompt = f"{SYSTEM}\n\n{context_block(ctx)}\n\n# Diff excerpt\n{tag('diff_excerpt', sample)}\n\nSummarise this pull request for the reviewer."
     return run_claude(prompt, OVERVIEW_SCHEMA, cancel)
 

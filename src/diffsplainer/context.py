@@ -23,7 +23,7 @@ def clip(s: str | None, n: int) -> str:
 def _safe(fn, *args):
     try:
         return fn(*args)
-    except Exception:
+    except Exception:  # noqa: BLE001 - any failure falls back
         return None
 
 
@@ -71,7 +71,9 @@ def related_pulls(owner: str, repo: str, pr: dict, changed: list[str], limit: in
         return []
     paths = changed[:MAX_PATHS]
     with ThreadPoolExecutor(max_workers=6) as pool:
-        commit_lists = list(pool.map(lambda p: _safe(gh.commits_for_path, owner, repo, p, pr["base"]["sha"]) or [], paths))
+        commit_lists = list(
+            pool.map(lambda p: _safe(gh.commits_for_path, owner, repo, p, pr["base"]["sha"]) or [], paths)
+        )
         sha_files: dict[str, set[str]] = {}
         for p, commits in zip(paths, commit_lists):
             for c in commits:
