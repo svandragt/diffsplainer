@@ -146,3 +146,19 @@ def test_chunk_schema_asks_for_high_level_what_stated_why_and_specific_concern()
         "triggers it. Leave it empty rather than give generic advice."
     )
     assert 'Keep "what" high-level; the diff beside it shows the detail.' in claude.SYSTEM
+
+
+def test_overview_schema_asks_for_outcome_design_choice_and_specific_risks():
+    props = claude.OVERVIEW_SCHEMA["properties"]
+    assert props["summary"]["description"] == (
+        "Two sentences at most: the outcome the PR delivers for users or the codebase, and its reason as the PR "
+        "description or context states it. No file-by-file tour."
+    )
+    assert props["approach"]["description"] == (
+        "One or two sentences on the shape of the solution: the main design choice, and any alternative the PR "
+        "mentions. Skip mechanics the diff shows."
+    )
+    assert props["review_focus"]["description"] == (
+        "Up to 3 specific risks a reviewer can verify across the PR, such as a cross-file interaction, an untested "
+        "named case, or a mismatch with the PR description. An empty list rather than generic advice."
+    )

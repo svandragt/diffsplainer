@@ -160,12 +160,27 @@ CHUNK_SCHEMA = {
 OVERVIEW_SCHEMA = {
     "type": "object",
     "properties": {
-        "summary": {"type": "string", "description": "What the PR does overall, 2-4 sentences"},
-        "approach": {"type": "string", "description": "How the change is structured, 1-3 sentences"},
+        "summary": {
+            "type": "string",
+            "description": (
+                "Two sentences at most: the outcome the PR delivers for users or the codebase, and its reason as the "
+                "PR description or context states it. No file-by-file tour."
+            ),
+        },
+        "approach": {
+            "type": "string",
+            "description": (
+                "One or two sentences on the shape of the solution: the main design choice, and any alternative the "
+                "PR mentions. Skip mechanics the diff shows."
+            ),
+        },
         "review_focus": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Up to 4 things a reviewer should check",
+            "description": (
+                "Up to 3 specific risks a reviewer can verify across the PR, such as a cross-file interaction, an "
+                "untested named case, or a mismatch with the PR description. An empty list rather than generic advice."
+            ),
         },
     },
     "required": ["summary", "approach", "review_focus"],
