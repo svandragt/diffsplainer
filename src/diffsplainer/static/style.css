@@ -104,5 +104,7 @@ main { max-width: 1600px; margin: 0 auto; padding: 16px; }
   .explain .inner { position: static; }
   #load { flex-wrap: wrap; }
   #url { flex-basis: 100%; }
+  .bar { position: static; }
+  .file-head { top: 0; }
 }
 @media (max-width: 499px) { .term-pop { width: calc(100% - 16px); } }
