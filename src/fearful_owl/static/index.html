@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fearful Owl · PR review</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="/">🦉 Fearful Owl</a>
+    <form id="load">
+      <input id="url" type="text" placeholder="https://github.com/owner/repo/pull/123" autocomplete="off" spellcheck="false">
+      <label title="How many related merged PRs to give Claude as context">
+        Prev PRs <input id="prs" type="number" min="0" max="10" value="3">
+      </label>
+      <button type="submit">Review</button>
+    </form>
+  </header>
+
+  <main id="app">
+    <section class="empty">
+      <h1>Explain a pull request</h1>
+      <p>Paste a GitHub PR URL above, or swap <code>github.com</code> for this host in the address bar:</p>
+      <p><code><span class="host"></span>/owner/repo/pull/123</code></p>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
