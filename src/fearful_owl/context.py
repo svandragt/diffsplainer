@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from itertools import zip_longest
 
 from . import github as gh
 
-ROOT_DOCS = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md", "CONTRIBUTING.md", "README.md"]
+ROOT_DOCS = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md", "CONTRIBUTING.md"]
 NESTED_DOCS = {"CLAUDE.md", "AGENTS.md"}
 MAX_DOC_CHARS = 6000
 MAX_TOTAL_DOC_CHARS = 20000
@@ -36,6 +37,7 @@ def project_instructions(owner: str, repo: str, ref: str, changed: list[str]) ->
             d, _, base = node["path"].rpartition("/")
             if node["type"] == "blob" and base in NESTED_DOCS and d in dirs:
                 wanted.append(node["path"])
+    wanted.append("README.md")  # last, so the fallback check below sees the nested files too
 
     docs: list[dict] = []
     total = 0
@@ -54,6 +56,16 @@ def project_instructions(owner: str, repo: str, ref: str, changed: list[str]) ->
     return docs
 
 
+def _round_robin_shas(commit_lists: list[list[dict]], limit: int) -> list[str]:
+    """First commit of each file, then the second of each, and so on, without repeats."""
+    shas: list[str] = []
+    for round_ in zip_longest(*commit_lists):
+        for commit in round_:
+            if commit and commit["sha"] not in shas:
+                shas.append(commit["sha"])
+    return shas[:limit]
+
+
 def related_pulls(owner: str, repo: str, pr: dict, changed: list[str], limit: int) -> list[dict]:
     if not limit:
         return []
@@ -64,7 +76,7 @@ def related_pulls(owner: str, repo: str, pr: dict, changed: list[str], limit: in
         for p, commits in zip(paths, commit_lists):
             for c in commits:
                 sha_files.setdefault(c["sha"], set()).add(p)
-        shas = list(sha_files)[:MAX_SHAS]
+        shas = _round_robin_shas(commit_lists, MAX_SHAS)
         pull_lists = list(pool.map(lambda s: _safe(gh.pulls_for_commit, owner, repo, s) or [], shas))
 
     found: dict[int, dict] = {}

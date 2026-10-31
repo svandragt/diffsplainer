@@ -21,17 +21,19 @@ from .diff import chunk_files
 
 PORT = int(os.environ.get("PORT", "3000"))
 CONCURRENCY = int(os.environ.get("CLAUDE_CONCURRENCY", "3"))
+MAX_CHANGED_LINES = int(os.environ.get("MAX_CHANGED_LINES", "1000"))
 MAX_PRS = 10
 BATCH_CHUNKS = 12
 BATCH_LINES = 400
 PR_TTL_S = 60
+PR_CACHE_SIZE = 50
 EXPLAIN_CACHE_SIZE = 50
 STATIC = Path(__file__).parent / "static"
 
 PR_RE = re.compile(r"^/api/pr/([\w.-]+)/([\w.-]+)/(\d+)$")
 EXPLAIN_RE = re.compile(r"^/api/explain/([\w.-]+)/([\w.-]+)/(\d+)$")
 
-_pr_cache: dict[str, tuple[float, dict]] = {}
+_pr_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _explain_cache: OrderedDict[str, list] = OrderedDict()
 _cache_lock = threading.Lock()
 
@@ -40,7 +42,12 @@ def load_pr(owner: str, repo: str, num: int) -> dict:
     key = f"{owner}/{repo}/{num}"
     with _cache_lock:
         hit = _pr_cache.get(key)
-    if hit and time.time() - hit[0] < PR_TTL_S:
+        if hit and time.time() - hit[0] >= PR_TTL_S:
+            del _pr_cache[key]
+            hit = None
+        elif hit:
+            _pr_cache.move_to_end(key)
+    if hit:
         return hit[1]
     with ThreadPoolExecutor(max_workers=2) as pool:
         pr_f = pool.submit(gh.get_pull, owner, repo, num)
@@ -69,6 +76,9 @@ def load_pr(owner: str, repo: str, num: int) -> dict:
     }
     with _cache_lock:
         _pr_cache[key] = (time.time(), data)
+        _pr_cache.move_to_end(key)
+        while len(_pr_cache) > PR_CACHE_SIZE:
+            _pr_cache.popitem(last=False)
     return data
 
 
@@ -178,7 +188,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _explain(self, owner, repo, num, pr_limit, send, gone):
         data = load_pr(owner, repo, num)
-        key = f"{owner}/{repo}/{num}@{data['pr']['headSha']}:{pr_limit}"
+        changed = data["pr"]["additions"] + data["pr"]["deletions"]
+        if changed > MAX_CHANGED_LINES:
+            return send(
+                "error",
+                {
+                    "scope": "limit",
+                    "message": f"This PR changes {changed} lines. Fearful Owl explains PRs up to "
+                    f"{MAX_CHANGED_LINES} changed lines, so the diff is shown without explanations.",
+                },
+            )
+        key = f"{owner}/{repo}/{num}@{data['pr']['baseSha']}..{data['pr']['headSha']}:{pr_limit}"
         with _cache_lock:
             cached = _explain_cache.get(key)
             if cached:
@@ -234,10 +254,13 @@ class Handler(BaseHTTPRequestHandler):
                 send("error", {"scope": "file", "ids": [c["id"] for c in file["chunks"]], "message": str(e)})
                 return False
             valid = {c["id"] for c in file["chunks"]}
+            seen = set()
             for c in out.get("chunks", []):
                 if c.get("id") in valid:
                     emit("chunk", c)
-            return True
+                    seen.add(c["id"])
+            # Rows left out show "No explanation returned" on the page; the incomplete log must not be cached.
+            return seen == valid
 
         ok = True
         with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
@@ -261,7 +284,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    server = ThreadingHTTPServer(("", PORT), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     server.daemon_threads = True
     print(f"PR review app on http://localhost:{PORT}")
     print(f"Open e.g. http://localhost:{PORT}/owner/repo/pull/123")

@@ -4,8 +4,10 @@ const app = $('#app');
 const urlInput = $('#url');
 const prsInput = $('#prs');
 let source = null;
+let loadSeq = 0;
 
 $('.host').textContent = location.host;
+const emptyHtml = app.innerHTML;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Tiny, safe markdown: `code` and **bold** only.
@@ -19,8 +21,16 @@ function parsePr(text) {
 function fromLocation() {
   const pr = parsePr(location.pathname);
   const prs = new URLSearchParams(location.search).get('prs');
-  if (prs !== null) prsInput.value = prs;
-  if (!pr) return;
+  prsInput.value = prs ?? '3';
+  if (!pr) {
+    loadSeq++;
+    if (source) source.close();
+    source = null;
+    urlInput.value = '';
+    document.title = 'Fearful Owl · PR review';
+    app.innerHTML = emptyHtml;
+    return;
+  }
   const canonical = `/${pr.owner}/${pr.repo}/pull/${pr.num}${location.search}`;
   if (location.pathname + location.search !== canonical) history.replaceState(null, '', canonical);
   urlInput.value = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.num}`;
@@ -38,10 +48,13 @@ $('#load').addEventListener('submit', (e) => {
 window.addEventListener('popstate', fromLocation);
 
 async function load({ owner, repo, num }) {
+  const seq = ++loadSeq;
   if (source) source.close();
+  source = null;
   app.innerHTML = '<div class="card">Loading pull request…</div>';
   const res = await fetch(`/api/pr/${owner}/${repo}/${num}`);
   const data = await res.json();
+  if (seq !== loadSeq) return;
   if (!res.ok) {
     app.innerHTML = `<div class="card">Could not load PR: ${esc(data.error)}</div>`;
     return;
@@ -143,7 +156,9 @@ function explain(owner, repo, num) {
     });
     else {
       source.close(); // stop EventSource auto-reconnecting into the same failure
-      status(`Error: ${d.message}`);
+      status(d.scope === 'limit' ? d.message : `Error: ${d.message}`);
+      $('.progress').hidden = true;
+      document.querySelectorAll('.skeleton').forEach((el) => el.remove());
     }
   });
 

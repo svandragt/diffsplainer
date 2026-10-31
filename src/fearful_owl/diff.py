@@ -20,7 +20,8 @@ def parse_hunks(patch: str) -> list[dict]:
     hunks: list[dict] = []
     cur = None
     old_no = new_no = 0
-    for line in patch.split("\n"):
+    # Not splitlines(): it also splits on \x0c, \u2028 and similar characters inside a source line.
+    for line in patch.removesuffix("\n").split("\n"):
         m = HUNK_RE.match(line)
         if m:
             old_no, new_no = int(m[1]), int(m[2])

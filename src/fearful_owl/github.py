@@ -10,6 +10,7 @@ import urllib.request
 
 API = os.environ.get("GITHUB_API", "https://api.github.com").rstrip("/")
 TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+FILES_MAX_PAGES = 30  # GitHub lists at most 3000 files (30 pages of 100) per PR
 
 
 class GitHubError(Exception):
@@ -58,7 +59,7 @@ def get_pull(owner: str, repo: str, num: int) -> dict:
 
 def get_pull_files(owner: str, repo: str, num: int) -> list[dict]:
     files: list[dict] = []
-    for page in range(1, 11):
+    for page in range(1, FILES_MAX_PAGES + 1):
         batch = gh(f"/repos/{owner}/{repo}/pulls/{num}/files?per_page=100&page={page}")
         files.extend(batch)
         if len(batch) < 100:
