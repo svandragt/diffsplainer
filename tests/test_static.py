@@ -6,6 +6,8 @@ import pytest
 from diffsplainer import server
 
 VENDOR = server.STATIC / "vendor"
+# a src/href whose value has a scheme (other than javascript:/data:) or is protocol-relative
+EXTERNAL_URL = r"""\b(?:src|href)\s*=\s*["'](?:(?!javascript:|data:)[a-z][a-z0-9+.-]*:|//)"""
 
 
 def test_prism_and_its_licence_are_vendored():
@@ -17,7 +19,7 @@ def test_index_loads_prism_from_the_app_before_app_js_and_nothing_from_outside()
     html = (server.STATIC / "index.html").read_text()
     srcs = re.findall(r'<script[^>]*\ssrc="([^"]+)"', html)
     assert srcs == ["/vendor/prism.js", "/app.js"]
-    assert not re.search(r"""(?:src|href)=["']https?:""", html)
+    assert not re.search(EXTERNAL_URL, html, re.IGNORECASE)
 
 
 @pytest.fixture
