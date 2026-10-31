@@ -326,4 +326,8 @@ document.addEventListener('mousedown', (e) => {
 });
 document.addEventListener('keydown', (e) => e.key === 'Escape' && closePop());
 
+fetch('/api/version').then((r) => r.json()).then((v) => {
+  document.getElementById('version').textContent = 'Diffsplainer' + (v.version ? ` ${v.version}` : '') +(v.commit ? ` (${v.commit})` : '');
+}).catch(() => {});
+
 fromLocation();

@@ -1,5 +1,6 @@
 import json
 import socket
+import subprocess
 import sys
 import threading
 import urllib.error
@@ -322,3 +323,52 @@ def test_log_line_omits_the_query_string(capsys):
     err = capsys.readouterr().err
     assert "/api/explain-term/o/r/1" in err
     assert "secret" not in err and "private" not in err
+
+
+def get_version(httpd) -> dict:
+    with urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/api/version") as r:
+        assert r.status == 200
+        return json.load(r)
+
+
+def test_version_reports_package_version_and_commit(serve):
+    from importlib.metadata import version
+
+    server.git_commit.cache_clear()
+    data = get_version(serve)
+    assert data["version"] == version("diffsplainer")
+    assert isinstance(data["commit"], str) and data["commit"]
+
+
+def test_version_commit_is_null_when_git_fails(serve, monkeypatch):
+    def no_git(*a, **k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(server.subprocess, "run", no_git)
+    server.git_commit.cache_clear()
+    try:
+        assert get_version(serve)["commit"] is None
+    finally:
+        server.git_commit.cache_clear()
+
+
+def test_version_is_null_when_package_is_not_installed(serve, monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+
+    def missing(_):
+        raise PackageNotFoundError("diffsplainer")
+
+    monkeypatch.setattr(server, "package_version", missing)
+    assert get_version(serve)["version"] is None
+
+
+def test_commit_is_null_when_checkout_is_another_repo(monkeypatch):
+    def other_repo(*a, **k):
+        return subprocess.CompletedProcess(a, 0, stdout="/somewhere/else\nabc1234\n", stderr="")
+
+    monkeypatch.setattr(server.subprocess, "run", other_repo)
+    server.git_commit.cache_clear()
+    try:
+        assert server.git_commit() is None
+    finally:
+        server.git_commit.cache_clear()

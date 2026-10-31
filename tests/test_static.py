@@ -19,7 +19,8 @@ def test_index_loads_prism_from_the_app_before_app_js_and_nothing_from_outside()
     html = (server.STATIC / "index.html").read_text()
     srcs = re.findall(r'<script[^>]*\ssrc="([^"]+)"', html)
     assert srcs == ["/vendor/prism.js", "/app.js"]
-    assert not re.search(EXTERNAL_URL, html, re.IGNORECASE)
+    loaded = re.sub(r"<a\b[^>]*>", "", html)  # links the user clicks load nothing
+    assert not re.search(EXTERNAL_URL, loaded, re.IGNORECASE)
 
 
 @pytest.fixture
