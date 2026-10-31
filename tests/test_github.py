@@ -60,6 +60,22 @@ def test_no_token_when_cli_unavailable_or_fails(monkeypatch, result):
     assert github._token() == ""
 
 
+@pytest.mark.parametrize(
+    "api, host",
+    [
+        ("https://api.github.com", "github.com"),
+        ("https://ghe.example.com/api/v3", "ghe.example.com"),
+    ],
+)
+def test_cli_is_asked_for_the_token_of_the_api_host(monkeypatch, api, host):
+    _env(monkeypatch)
+    monkeypatch.setattr(github, "API", api)
+    argv = []
+    monkeypatch.setattr(subprocess, "run", lambda a, **k: argv.append(a) or _done(0, "c"))
+    github._token()
+    assert argv == [["gh", "auth", "token", "--hostname", host]]
+
+
 def test_cli_runs_once(monkeypatch):
     _env(monkeypatch)
     calls = []

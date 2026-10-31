@@ -12,7 +12,7 @@ Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and the [Claude Co
 uv run fearful-owl            # http://localhost:3000
 ```
 
-Private repos need you to be logged in with the GitHub CLI (`gh auth login`), or to set `GITHUB_TOKEN`.
+Private repos need you to be logged in with the GitHub CLI (`gh auth login`), or to set `GITHUB_TOKEN`. If you log in with `gh` after starting the app, restart it.
 
 Without uv: `PYTHONPATH=src python -m fearful_owl`.
 

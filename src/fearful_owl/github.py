@@ -19,9 +19,16 @@ def _token() -> str:
     env = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if env:
         return env
+    host = urllib.parse.urlsplit(API).hostname
+    if host == "api.github.com":
+        host = "github.com"
     try:
         res = subprocess.run(
-            ["gh", "auth", "token"], capture_output=True, text=True, timeout=5, check=False
+            ["gh", "auth", "token", "--hostname", host or "github.com"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return ""
