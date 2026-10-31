@@ -1,7 +1,5 @@
 import re
-import threading
 import urllib.request
-from http.server import ThreadingHTTPServer
 
 import pytest
 
@@ -23,18 +21,12 @@ def test_index_loads_prism_from_the_app_before_app_js_and_nothing_from_outside()
 
 
 @pytest.fixture
-def get():
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-    httpd.daemon_threads = True
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-
+def get(serve):
     def fetch(path):
-        with urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}{path}") as res:
+        with urllib.request.urlopen(f"http://127.0.0.1:{serve.server_port}{path}") as res:
             return res.status, res.headers["Content-Type"], res.read()
 
-    yield fetch
-    httpd.shutdown()
-    httpd.server_close()
+    return fetch
 
 
 def test_prism_is_served_as_javascript(get):
@@ -42,3 +34,11 @@ def test_prism_is_served_as_javascript(get):
     assert status == 200
     assert "javascript" in ctype  # a missing file would fall back to index.html as text/html
     assert b"Prism.languages" in body
+
+
+def test_every_language_app_js_maps_an_extension_to_has_a_grammar_in_prism():
+    js = (server.STATIC / "app.js").read_text()
+    ids = set(re.findall(r":\s*'(\w+)'", re.search(r"const LANGS = \{(.*?)\};", js, re.DOTALL).group(1)))
+    assert {"python", "javascript"} <= ids  # the map was found
+    prism = (VENDOR / "prism.js").read_text()
+    assert [i for i in sorted(ids) if not re.search(rf"languages\.{i}=", prism)] == []

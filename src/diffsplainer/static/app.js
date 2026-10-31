@@ -26,6 +26,12 @@ function parsePr(text) {
   return m ? { owner: m[1], repo: m[2], num: m[3] } : null;
 }
 
+// Replaces the page content. The observer lets go of the old diffs first, so it does not keep their tables in memory.
+function setApp(html) {
+  lazy?.disconnect();
+  app.innerHTML = html;
+}
+
 function fromLocation() {
   closePop();
   const pr = parsePr(location.pathname);
@@ -35,7 +41,7 @@ function fromLocation() {
     source = null;
     urlInput.value = '';
     document.title = 'Diffsplainer · PR review';
-    app.innerHTML = emptyHtml;
+    setApp(emptyHtml);
     return;
   }
   const canonical = `/${pr.owner}/${pr.repo}/pull/${pr.num}${location.search}`;
@@ -57,12 +63,12 @@ async function load({ owner, repo, num }) {
   const seq = ++loadSeq;
   if (source) source.close();
   source = null;
-  app.innerHTML = '<div class="card">Loading pull request…</div>';
+  setApp('<div class="card">Loading pull request…</div>');
   const res = await fetch(`/api/pr/${owner}/${repo}/${num}`);
   const data = await res.json();
   if (seq !== loadSeq) return;
   if (!res.ok) {
-    app.innerHTML = `<div class="card">Could not load PR: ${esc(data.error)}</div>`;
+    setApp(`<div class="card">Could not load PR: ${esc(data.error)}</div>`);
     return;
   }
   document.title = `#${data.pr.number} ${data.pr.title} · Diffsplainer`;
@@ -72,7 +78,7 @@ async function load({ owner, repo, num }) {
 
 function render({ pr, files }) {
   const state = pr.draft ? 'draft' : pr.state;
-  app.innerHTML = `
+  setApp(`
     <section class="card pr-head">
       <h1>${esc(pr.title)} <a href="${esc(pr.url)}" target="_blank" rel="noopener">#${pr.number}</a></h1>
       <div class="meta">
@@ -88,9 +94,8 @@ function render({ pr, files }) {
       <section class="card overview" id="overview"><h2>Overview</h2><div class="skeleton"></div><div class="skeleton short"></div></section>
       <section class="card context" id="context"><h2>Context given to Claude</h2><div class="skeleton short"></div></section>
     </div>
-    ${files.map(renderFile).join('')}`;
-  lazy.disconnect();
-  document.querySelectorAll('.diff[data-lang]').forEach((el) => lazy.observe(el));
+    ${files.map(renderFile).join('')}`);
+  if (lazy) document.querySelectorAll('.diff[data-lang]').forEach((el) => lazy.observe(el));
 }
 
 // Prism language per file extension; other files stay plain. The grammars are in vendor/prism.js.
@@ -98,28 +103,32 @@ const LANGS = {
   go: 'go', py: 'python', php: 'php', c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp', hh: 'cpp',
   css: 'css', scss: 'scss', js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'jsx', ts: 'typescript',
   tsx: 'tsx', html: 'markup', htm: 'markup', xml: 'markup', svg: 'markup', gd: 'gdscript', json: 'json',
-  yml: 'yaml', yaml: 'yaml', sh: 'bash', bash: 'bash', md: 'markdown', rs: 'rust', java: 'java', rb: 'ruby', sql: 'sql',
+  yml: 'yaml', yaml: 'yaml', sh: 'bash', bash: 'bash', md: 'markdown', markdown: 'markdown', rs: 'rust', java: 'java', rb: 'ruby',
+  sql: 'sql', toml: 'toml',
 };
 const langOf = (name) => {
   const ext = name.match(/\.([^./]+)$/)?.[1].toLowerCase();
   return Object.hasOwn(LANGS, ext) ? LANGS[ext] : '';
 };
 const MAX_HIGHLIGHT_CHARS = 1000; // longer lines (minified code) stay plain: Prism's regexes slow down on them
+const MAX_HIGHLIGHT_ROWS = 1500; // chunks with more rows (a lockfile or generated file) stay plain: they would block the page
 
 // Highlights one line at a time, so a multi-line comment or string is coloured line by line as code.
 // Prism.highlight escapes its input, so raw diff text never reaches innerHTML.
 function highlight(diff) {
   const lang = diff.dataset.lang;
   const grammar = Prism.languages[lang];
-  if (!grammar) return;
-  diff.querySelectorAll('td.s').forEach((td) => {
+  const cells = diff.querySelectorAll('td.s');
+  if (!grammar || cells.length > MAX_HIGHLIGHT_ROWS) return;
+  cells.forEach((td) => {
     const line = td.textContent;
     if (line && line.length <= MAX_HIGHLIGHT_CHARS) td.innerHTML = Prism.highlight(line, grammar, lang);
   });
 }
 
 // Chunks are highlighted when they near the viewport, so a long PR costs nothing up front.
-const lazy = new IntersectionObserver((entries) => entries.forEach((e) => {
+// Without Prism (its script failed to load) there is no observer and the code stays plain.
+const lazy = typeof Prism === 'undefined' ? null : new IntersectionObserver((entries) => entries.forEach((e) => {
   if (!e.isIntersecting) return;
   lazy.unobserve(e.target);
   highlight(e.target);

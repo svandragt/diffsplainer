@@ -5,7 +5,6 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 
 import pytest
@@ -184,7 +183,7 @@ def test_pr_cache_drops_expired_entry_when_seen(monkeypatch):
 
 
 @pytest.fixture
-def term(monkeypatch):
+def term(monkeypatch, serve):
     server._term_cache.clear()
     fake = SimpleNamespace(pr=make_pr(), calls=[], error=None, unhandled=[])
 
@@ -196,13 +195,10 @@ def term(monkeypatch):
 
     monkeypatch.setattr(server, "load_pr", lambda *_: fake.pr)
     monkeypatch.setattr(server, "explain_term", explain_term)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-    httpd.daemon_threads = True
-    httpd.handle_error = lambda *_: fake.unhandled.append(sys.exc_info()[1])
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    serve.handle_error = lambda *_: fake.unhandled.append(sys.exc_info()[1])
 
     def get(**params):
-        url = f"http://127.0.0.1:{httpd.server_port}/api/explain-term/o/r/1?{urllib.parse.urlencode(params)}"
+        url = f"http://127.0.0.1:{serve.server_port}/api/explain-term/o/r/1?{urllib.parse.urlencode(params)}"
         try:
             with urllib.request.urlopen(url) as res:
                 return res.status, json.load(res)
@@ -210,9 +206,7 @@ def term(monkeypatch):
             return e.code, json.load(e)
 
     fake.get = get
-    yield fake
-    httpd.shutdown()
-    httpd.server_close()
+    return fake
 
 
 @pytest.mark.parametrize(
