@@ -164,7 +164,8 @@ OVERVIEW_SCHEMA = {
             "type": "string",
             "description": (
                 "Two sentences at most: the outcome the PR delivers for users or the codebase, and its reason as the "
-                "PR description or context states it. No file-by-file tour."
+                "PR description or context states it. No file-by-file tour. "
+                "If nothing states the reason, say 'Reason not stated in the PR.'"
             ),
         },
         "approach": {

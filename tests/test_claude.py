@@ -152,7 +152,8 @@ def test_overview_schema_asks_for_outcome_design_choice_and_specific_risks():
     props = claude.OVERVIEW_SCHEMA["properties"]
     assert props["summary"]["description"] == (
         "Two sentences at most: the outcome the PR delivers for users or the codebase, and its reason as the PR "
-        "description or context states it. No file-by-file tour."
+        "description or context states it. No file-by-file tour. "
+        "If nothing states the reason, say 'Reason not stated in the PR.'"
     )
     assert props["approach"]["description"] == (
         "One or two sentences on the shape of the solution: the main design choice, and any alternative the PR "
