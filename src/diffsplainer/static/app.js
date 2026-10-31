@@ -105,8 +105,16 @@ const LANGS = {
   tsx: 'tsx', html: 'markup', htm: 'markup', xml: 'markup', svg: 'markup', gd: 'gdscript', json: 'json',
   yml: 'yaml', yaml: 'yaml', sh: 'bash', bash: 'bash', md: 'markdown', markdown: 'markdown', rs: 'rust', java: 'java', rb: 'ruby',
   sql: 'sql', toml: 'toml',
+  cs: 'csharp', kt: 'kotlin', kts: 'kotlin', swift: 'swift', dart: 'dart', lua: 'lua', ini: 'ini', cfg: 'ini',
+  env: 'ini', editorconfig: 'ini', tf: 'hcl', hcl: 'hcl', graphql: 'graphql', gql: 'graphql', ps1: 'powershell',
+  psm1: 'powershell', less: 'less', zsh: 'bash', jsonc: 'json', json5: 'json', phtml: 'php', vue: 'markup',
+  svelte: 'markup',
 };
+// Files named by convention rather than extension; checked on the base name before LANGS.
+const NAME_LANGS = [[/^Dockerfile(\.|$)/, 'docker'], [/^(Makefile|GNUmakefile)$|\.mk$/, 'makefile'], [/^\.env\./, 'ini']];
 const langOf = (name) => {
+  const byName = NAME_LANGS.find(([re]) => re.test(name.split('/').pop()));
+  if (byName) return byName[1];
   const ext = name.match(/\.([^./]+)$/)?.[1].toLowerCase();
   return Object.hasOwn(LANGS, ext) ? LANGS[ext] : '';
 };
