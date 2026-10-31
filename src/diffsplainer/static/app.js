@@ -7,9 +7,9 @@ let source = null;
 let loadSeq = 0;
 
 $('.host').textContent = location.host;
-// Opens the current github.com PR in this app; built from location.origin so it follows any host/port.
+// Opens the current GitHub PR (github.com or Enterprise) in this app; built from location.origin so it follows any host/port.
 const bookmarklet = $('#bookmarklet');
-bookmarklet.href = 'javascript:' + encodeURIComponent('(()=>{const m=location.pathname.match(/^\\/([^/]+)\\/([^/]+)\\/pull\\/(\\d+)/);if(location.hostname!==\'github.com\'||!m){alert(\'Open a GitHub pull request first\');return}window.open(ORIGIN+\'/\'+m[1]+\'/\'+m[2]+\'/pull/\'+m[3],\'_blank\')})()'.replace('ORIGIN', JSON.stringify(location.origin)));
+bookmarklet.href = 'javascript:' + encodeURIComponent('(()=>{const m=location.pathname.match(/^\\/([^/]+)\\/([^/]+)\\/pull\\/(\\d+)/);if(!m){alert(\'Open a GitHub pull request first\');return}window.open(ORIGIN+\'/\'+m[1]+\'/\'+m[2]+\'/pull/\'+m[3],\'_blank\')})()'.replace('ORIGIN', JSON.stringify(location.origin)));
 app.addEventListener('click', (e) => {
   const link = e.target.closest('#bookmarklet');
   if (!link) return;
