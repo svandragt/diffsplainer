@@ -127,3 +127,22 @@ def test_private_cwd_is_recreated_after_it_is_deleted(monkeypatch):
     assert os.path.isdir(second)
     assert stat.S_IMODE(os.stat(second).st_mode) == 0o700
     shutil.rmtree(second)
+
+
+def test_chunk_schema_asks_for_high_level_what_stated_why_and_specific_concern():
+    props = claude.CHUNK_SCHEMA["properties"]["chunks"]["items"]["properties"]
+    assert props["what"]["description"] == (
+        "One sentence, under about 20 words, on the effect of the change: what it lets the code or the user do "
+        "differently. No line-by-line narration. Leave identifiers to the diff unless one is the point."
+    )
+    assert props["why"]["description"] == (
+        "One or two sentences on the reason: the problem it solves or the PR goal it serves. Cite the PR description, "
+        "project instructions or a related PR when they give the reason. If none does, write 'Reason not stated in "
+        "the PR.' Don't guess."
+    )
+    assert props["concern"]["description"] == (
+        "Only a specific risk a reviewer can verify in this chunk: a likely bug, an unhandled edge case, a security "
+        "or data issue, or a mismatch with the PR description or project instructions. Name the line or input that "
+        "triggers it. Leave it empty rather than give generic advice."
+    )
+    assert 'Keep "what" high-level; the diff beside it shows the detail.' in claude.SYSTEM
