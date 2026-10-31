@@ -189,6 +189,7 @@ OVERVIEW_SCHEMA = {
 
 SYSTEM = """You are helping a code reviewer understand a GitHub pull request.
 Explain changes plainly and concretely for an engineer who has not seen this code.
+Write in plain language: short sentences, common words, active voice. Name the thing that acts. No filler, hedging or marketing words such as "robust", "seamless" or "leverage".
 Ground the "why" in the PR description, project instructions and previous PRs when they apply; never invent history.
 Keep "what" high-level; the diff beside it shows the detail.
 Use `backticks` for identifiers. Be concise.

@@ -163,3 +163,8 @@ def test_overview_schema_asks_for_outcome_design_choice_and_specific_risks():
         "Up to 3 specific risks a reviewer can verify across the PR, such as a cross-file interaction, an untested "
         "named case, or a mismatch with the PR description. An empty list rather than generic advice."
     )
+
+
+def test_system_asks_for_plain_language():
+    line = 'Write in plain language: short sentences, common words, active voice. Name the thing that acts. No filler, hedging or marketing words such as "robust", "seamless" or "leverage".'
+    assert line in claude.SYSTEM
