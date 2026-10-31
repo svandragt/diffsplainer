@@ -29,6 +29,8 @@ The app fetches the PR from GitHub and splits each file's diff into chunks. Clau
 
 Claude also gets the PR description, the project's instruction files (such as `CLAUDE.md` and `AGENTS.md`) and a few earlier merged PRs that touched the same files. The "Context given to Claude" panel lists the ones it used.
 
+The app runs Claude Code without your own MCP servers, hooks, slash commands and `CLAUDE.md`, so each call stays small. Closing or reloading the page stops the Claude calls it started.
+
 Opening the same PR again reuses the explanations while its commits stay the same. The app drops them when it restarts, or when it makes room for newer PRs (it keeps 50). Editing the PR title or description does not refresh them.
 
 PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGED_LINES` to change the limit.
@@ -41,8 +43,8 @@ PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGE
 | `GITHUB_TOKEN` / `GH_TOKEN` | – | GitHub API auth |
 | `GITHUB_API` | `https://api.github.com` | API base URL (for GitHub Enterprise) |
 | `CLAUDE_BIN` | `claude` | Path to the Claude Code CLI |
-| `CLAUDE_MODEL` | CLI default | Model passed to `--model` |
-| `CLAUDE_CONCURRENCY` | `3` | Parallel Claude calls |
+| `CLAUDE_MODEL` | `sonnet` | Model passed to `--model`. The app ignores the model set in your Claude Code settings. |
+| `CLAUDE_CONCURRENCY` | `6` | Parallel Claude calls |
 | `CLAUDE_TIMEOUT_MS` | `240000` | Timeout for each Claude call |
 | `MAX_CHANGED_LINES` | `1000` | Largest PR (additions plus deletions) that gets explanations |
 

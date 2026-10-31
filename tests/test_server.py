@@ -1,9 +1,10 @@
+import socket
 import threading
 from types import SimpleNamespace
 
 import pytest
 
-from fearful_owl import server
+from fearful_owl import claude, server
 
 CHUNKS = [{"id": f"f0c{i}", "scope": "", "lines": [{"t": "add", "o": None, "n": i, "s": "x"}]} for i in range(2)]
 
@@ -19,19 +20,33 @@ def make_pr(base: str = "b1", head: str = "h1", additions: int = 10, deletions: 
 @pytest.fixture
 def explain(monkeypatch):
     server._explain_cache.clear()
-    fake = SimpleNamespace(pr=make_pr(), ids=[c["id"] for c in CHUNKS], calls=[], overviews=[])
+    fake = SimpleNamespace(
+        pr=make_pr(),
+        ids=[c["id"] for c in CHUNKS],
+        calls=[],
+        overviews=[],
+        cancels=[],
+        overview_cancels=[],
+        gone=threading.Event(),
+        disconnect=False,
+    )
 
-    def explain_file(ctx, file):
+    def explain_file(ctx, file, cancel=None):
         fake.calls.append(file)
+        fake.cancels.append(cancel)
+        if fake.disconnect:
+            cancel.set()
+            raise claude.ClaudeCancelled
         return {"chunks": [{"id": i, "title": "t", "what": "w", "why": "y"} for i in fake.ids]}
 
-    def explain_overview(ctx, files):
+    def explain_overview(ctx, files, cancel=None):
         fake.overviews.append(files)
+        fake.overview_cancels.append(cancel)
         return {"summary": "s", "approach": "a", "review_focus": []}
 
     def run():
         events = []
-        server.Handler._explain(None, "o", "r", 1, 3, lambda e, p: events.append((e, p)), threading.Event())
+        server.Handler._explain(None, "o", "r", 1, 3, lambda e, p: events.append((e, p)), fake.gone)
         return events
 
     monkeypatch.setattr(server, "load_pr", lambda *_: fake.pr)
@@ -82,6 +97,49 @@ def test_pr_at_the_line_cap_is_explained(explain, monkeypatch):
     explain.pr = make_pr(additions=600, deletions=400)
     assert explain.run()[-1][0] == "done"
     assert len(explain.calls) == 1
+
+
+def test_explain_calls_receive_the_disconnect_event(explain):
+    explain.run()
+    assert explain.cancels == [explain.gone]
+    assert explain.overview_cancels == [explain.gone]
+
+
+def test_disconnect_stops_queued_batches_without_error_events_or_caching(explain, monkeypatch):
+    monkeypatch.setattr(server, "CONCURRENCY", 1)
+    explain.pr["files"] = [{"filename": n, "chunks": [{**CHUNKS[0], "id": n}]} for n in ("a.py", "b.py")]
+    explain.disconnect = True
+    events = explain.run()
+    assert len(explain.calls) == 1
+    assert not [e for e, _ in events if e == "error"]
+    assert not server._explain_cache
+
+
+def test_watcher_sets_gone_when_the_client_closes_the_socket(monkeypatch):
+    monkeypatch.setattr(server, "WATCH_INTERVAL_S", 0.05)
+    ours, theirs = socket.socketpair()
+    gone, stop = threading.Event(), threading.Event()
+    threading.Thread(target=server.watch_disconnect, args=(ours, gone, stop), daemon=True).start()
+    theirs.close()
+    assert gone.wait(1)
+    stop.set()
+    ours.close()
+
+
+def test_watcher_leaves_pending_request_bytes_unread(monkeypatch):
+    monkeypatch.setattr(server, "WATCH_INTERVAL_S", 0.05)
+    ours, theirs = socket.socketpair()
+    gone, stop = threading.Event(), threading.Event()
+    watcher = threading.Thread(target=server.watch_disconnect, args=(ours, gone, stop), daemon=True)
+    watcher.start()
+    theirs.send(b"x")
+    assert not gone.wait(0.4)
+    assert ours.recv(1) == b"x"
+    stop.set()
+    watcher.join(1)
+    assert not watcher.is_alive()
+    ours.close()
+    theirs.close()
 
 
 def _stub_github(monkeypatch):
