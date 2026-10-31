@@ -1,16 +1,38 @@
-"""Minimal GitHub REST client (stdlib only). Uses GITHUB_TOKEN / GH_TOKEN when present."""
+"""Minimal GitHub REST client (stdlib only). Uses GITHUB_TOKEN, GH_TOKEN or `gh auth token`."""
 
 from __future__ import annotations
 
+import functools
 import json
 import os
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
 
 API = os.environ.get("GITHUB_API", "https://api.github.com").rstrip("/")
-TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
 FILES_MAX_PAGES = 30  # GitHub lists at most 3000 files (30 pages of 100) per PR
+
+
+@functools.cache
+def _token() -> str:
+    env = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if env:
+        return env
+    host = urllib.parse.urlsplit(API).hostname
+    if host == "api.github.com":
+        host = "github.com"
+    try:
+        res = subprocess.run(
+            ["gh", "auth", "token", "--hostname", host or "github.com"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return res.stdout.strip() if res.returncode == 0 else ""
 
 
 class GitHubError(Exception):
@@ -25,8 +47,8 @@ def _request(path: str, raw: bool, token: bool):
         "Accept": "application/vnd.github.raw" if raw else "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    if token and TOKEN:
-        headers["Authorization"] = f"Bearer {TOKEN}"
+    if token and _token():
+        headers["Authorization"] = f"Bearer {_token()}"
     req = urllib.request.Request(API + path, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as res:
         body = res.read().decode("utf-8", "replace")
@@ -39,7 +61,7 @@ def gh(path: str, raw: bool = False, allow_404: bool = False):
             return _request(path, raw, token=True)
         except urllib.error.HTTPError as e:
             # A bad token on a public repo: retry this request anonymously.
-            if e.code == 401 and TOKEN:
+            if e.code == 401 and _token():
                 return _request(path, raw, token=False)
             raise
     except urllib.error.HTTPError as e:

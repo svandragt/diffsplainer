@@ -9,9 +9,10 @@ Open a PR and the app shows its diff split into logical chunks on the right. On 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and the [Claude Code](https://claude.com/claude-code) CLI (`claude`), logged in.
 
 ```sh
-export GITHUB_TOKEN=ghp_...   # optional for public repos, required for private ones
 uv run fearful-owl            # http://localhost:3000
 ```
+
+Private repos need you to be logged in with the GitHub CLI (`gh auth login`), or to set `GITHUB_TOKEN`. If you log in with `gh` after starting the app, restart it.
 
 Without uv: `PYTHONPATH=src python -m fearful_owl`.
 
@@ -40,7 +41,7 @@ PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGE
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP port. The app listens on `127.0.0.1` only. |
-| `GITHUB_TOKEN` / `GH_TOKEN` | – | GitHub API auth |
+| `GITHUB_TOKEN` / `GH_TOKEN` | GitHub CLI token | GitHub API auth |
 | `GITHUB_API` | `https://api.github.com` | API base URL (for GitHub Enterprise) |
 | `CLAUDE_BIN` | `claude` | Path to the Claude Code CLI |
 | `CLAUDE_MODEL` | `sonnet` | Model passed to `--model`. The app ignores the model set in your Claude Code settings. |
