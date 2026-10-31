@@ -23,7 +23,7 @@ def clip(s: str | None, n: int) -> str:
 def _safe(fn, *args):
     try:
         return fn(*args)
-    except Exception:
+    except Exception:  # noqa: BLE001 - any failure falls back
         return None
 
 

@@ -202,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
             data = load_pr(owner, repo, num)
         except gh.GitHubError as e:
             return self.send_json(e.status, {"error": str(e)})
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - report any failure to the client
             return self.send_json(500, {"error": str(e)})
         self.send_json(200, {k: v for k, v in data.items() if k != "_raw"})
 
@@ -218,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
             data = load_pr(owner, repo, num)
         except gh.GitHubError as e:
             return self.send_json(e.status, {"error": str(e)})
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - report any failure to the client
             return self.send_json(500, {"error": str(e)})
         chunk = None
         if chunk_id is not None:
@@ -241,7 +241,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         except ClaudeError as e:
             return self.send_json(502, {"error": str(e)})
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - report any failure to the client
             return self.send_json(502, {"error": str(e)})
         finally:
             stop.set()
@@ -283,7 +283,7 @@ class Handler(BaseHTTPRequestHandler):
             self._explain(owner, repo, num, pr_limit, send, gone)
         except ClientGone:
             pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - report any failure to the client
             try:
                 send("error", {"scope": "fatal", "message": str(e)})
             except ClientGone:
@@ -348,7 +348,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise
             except ClaudeCancelled:
                 return
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - report any failure to the client
                 send("error", {"scope": "overview", "message": str(e)})
                 return False
 
@@ -359,7 +359,7 @@ class Handler(BaseHTTPRequestHandler):
                 out = explain_file(ctx, file, gone)
             except ClaudeCancelled:
                 return
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - report any failure to the client
                 send("error", {"scope": "file", "ids": [c["id"] for c in file["chunks"]], "message": str(e)})
                 return False
             valid = {c["id"] for c in file["chunks"]}
