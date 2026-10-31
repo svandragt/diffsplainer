@@ -262,7 +262,11 @@ function onSelect(e) {
 const onUp = (e) => pop?.contains(e.target) || setTimeout(onSelect, 0, e);
 document.addEventListener('mouseup', onUp);
 document.addEventListener('keyup', onUp);
-document.addEventListener('mousedown', (e) => pop && !pop.contains(e.target) && closePop());
+document.addEventListener('mousedown', (e) => {
+  if (!pop || pop.contains(e.target)) return;
+  closePop();
+  window.getSelection().removeAllRanges(); // else the mouseup that follows reopens the Explain button
+});
 document.addEventListener('keydown', (e) => e.key === 'Escape' && closePop());
 
 fromLocation();

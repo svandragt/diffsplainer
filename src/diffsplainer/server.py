@@ -131,7 +131,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # quieter logs: skip static assets
         if "/api/" in self.path:
-            super().log_message(fmt, *args)
+            # the query string holds the selected text and paragraph from private PRs
+            super().log_message(fmt, *(re.sub(r"\?\S*", "", a) if isinstance(a, str) else a for a in args))
 
     def do_GET(self):
         url = urlparse(self.path)

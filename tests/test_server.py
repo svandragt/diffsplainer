@@ -317,3 +317,14 @@ def test_term_load_failure_is_a_500_with_an_error_message(term, monkeypatch):
     monkeypatch.setattr(server, "load_pr", fail)
     assert term.get(text="term") == (500, {"error": "boom"})
     assert not term.calls
+
+
+def test_log_line_omits_the_query_string(capsys):
+    h = object.__new__(server.Handler)
+    h.client_address = ("127.0.0.1", 1)
+    h.path = "/api/explain-term/o/r/1?text=secret&around=private"
+    h.requestline = f"GET {h.path} HTTP/1.1"
+    h.log_request(200)
+    err = capsys.readouterr().err
+    assert "/api/explain-term/o/r/1" in err
+    assert "secret" not in err and "private" not in err
