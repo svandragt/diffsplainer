@@ -8,11 +8,14 @@ import os
 import re
 import select
 import socket
+import subprocess
 import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.metadata import version as package_version
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -110,6 +113,17 @@ def batches(file: dict) -> list[dict]:
     return [{**file, "chunks": b} for b in out]
 
 
+@cache
+def git_commit() -> str | None:
+    """Short SHA of the checkout the package runs from; None outside a checkout."""
+    try:
+        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=Path(__file__).parent,
+                           capture_output=True, text=True, timeout=2, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
+
+
 class ClientGone(Exception):
     pass
 
@@ -137,6 +151,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         path = unquote(url.path)
+        if path == "/api/version":
+            return self.send_json(200, {"version": package_version("diffsplainer"), "commit": git_commit()})
         if m := PR_RE.match(path):
             return self.api_pr(m[1], m[2], int(m[3]))
         if m := EXPLAIN_RE.match(path):
