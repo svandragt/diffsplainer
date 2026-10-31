@@ -102,7 +102,6 @@ main { max-width: 1600px; margin: 0 auto; padding: 16px; }
   .row, .split { grid-template-columns: 1fr; }
   .explain { border-right: 0; border-bottom: 1px solid var(--border); }
   .explain .inner { position: static; }
-  #load label { display: none; }
   #load { flex-wrap: wrap; }
   #url { flex-basis: 100%; }
 }
