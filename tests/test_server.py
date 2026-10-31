@@ -1,3 +1,4 @@
+import subprocess
 import json
 import socket
 import sys
@@ -347,5 +348,27 @@ def test_version_commit_is_null_when_git_fails(serve, monkeypatch):
     server.git_commit.cache_clear()
     try:
         assert get_version(serve)["commit"] is None
+    finally:
+        server.git_commit.cache_clear()
+
+
+def test_version_is_null_when_package_is_not_installed(serve, monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+
+    def missing(_):
+        raise PackageNotFoundError("diffsplainer")
+
+    monkeypatch.setattr(server, "package_version", missing)
+    assert get_version(serve)["version"] is None
+
+
+def test_commit_is_null_when_checkout_is_another_repo(monkeypatch):
+    def other_repo(*a, **k):
+        return subprocess.CompletedProcess(a, 0, stdout="/somewhere/else\nabc1234\n", stderr="")
+
+    monkeypatch.setattr(server.subprocess, "run", other_repo)
+    server.git_commit.cache_clear()
+    try:
+        assert server.git_commit() is None
     finally:
         server.git_commit.cache_clear()
