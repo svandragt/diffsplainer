@@ -1,5 +1,5 @@
-from fearful_owl import context
-from fearful_owl import github as gh
+from diffsplainer import context
+from diffsplainer import github as gh
 
 
 def _repo(monkeypatch, files: dict[str, str]) -> list[str]:

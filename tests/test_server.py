@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fearful_owl import claude, server
+from diffsplainer import claude, server
 
 CHUNKS = [{"id": f"f0c{i}", "scope": "", "lines": [{"t": "add", "o": None, "n": i, "s": "x"}]} for i in range(2)]
 
@@ -84,7 +84,7 @@ def test_pr_over_the_line_cap_skips_claude_and_reports_why(explain, monkeypatch)
     monkeypatch.setattr(server, "MAX_CHANGED_LINES", 1000)
     explain.pr = make_pr(additions=800, deletions=300)
     message = (
-        "This PR changes 1100 lines. Fearful Owl explains PRs up to 1000 changed lines, "
+        "This PR changes 1100 lines. Diffsplainer explains PRs up to 1000 changed lines, "
         "so the diff is shown without explanations."
     )
     assert explain.run() == [("error", {"scope": "limit", "message": message})]

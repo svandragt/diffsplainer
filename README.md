@@ -1,4 +1,4 @@
-# fearful-owl
+# diffsplainer
 
 Diff explanations for GitHub pull requests, powered by Claude Code.
 
@@ -9,12 +9,12 @@ Open a PR and the app shows its diff split into logical chunks on the right. On 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and the [Claude Code](https://claude.com/claude-code) CLI (`claude`), logged in.
 
 ```sh
-uv run fearful-owl            # http://localhost:3000
+uv run diffsplainer            # http://localhost:3000
 ```
 
 Private repos need you to be logged in with the GitHub CLI (`gh auth login`), or to set `GITHUB_TOKEN`. If you log in with `gh` after starting the app, restart it.
 
-Without uv: `PYTHONPATH=src python -m fearful_owl`.
+Without uv: `PYTHONPATH=src python -m diffsplainer`.
 
 Open a PR in either of these ways:
 
@@ -49,4 +49,4 @@ PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGE
 | `CLAUDE_TIMEOUT_MS` | `240000` | Timeout for each Claude call |
 | `MAX_CHANGED_LINES` | `1000` | Largest PR (additions plus deletions) that gets explanations |
 
-The app uses only the Python standard library. The browser UI is plain HTML/CSS/JS in `src/fearful_owl/static/`.
+The app uses only the Python standard library. The browser UI is plain HTML/CSS/JS in `src/diffsplainer/static/`.

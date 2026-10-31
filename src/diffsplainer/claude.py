@@ -34,7 +34,7 @@ def _private_cwd() -> str:
     global _cwd
     with _cwd_lock:
         if _cwd is None or not os.path.isdir(_cwd):
-            _cwd = tempfile.mkdtemp(prefix="fearful-owl-")  # mode 0700
+            _cwd = tempfile.mkdtemp(prefix="diffsplainer-")  # mode 0700
             atexit.register(shutil.rmtree, _cwd, ignore_errors=True)
         return _cwd
 

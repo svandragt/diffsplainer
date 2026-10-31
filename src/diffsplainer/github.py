@@ -43,7 +43,7 @@ class GitHubError(Exception):
 
 def _request(path: str, raw: bool, token: bool):
     headers = {
-        "User-Agent": "fearful-owl-review",
+        "User-Agent": "diffsplainer-review",
         "Accept": "application/vnd.github.raw" if raw else "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }

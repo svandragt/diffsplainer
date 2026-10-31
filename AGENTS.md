@@ -4,18 +4,18 @@ Guidance to coding agents working in this repository.
 
 ## Project
 
-fearful-owl is a GitHub PR review app. It shows a PR's diff as chunks, with an explanation from a headless Claude Code run next to each chunk. At runtime the backend uses only the Python 3.11+ standard library. The browser UI is plain HTML, CSS and JavaScript in `src/fearful_owl/static/`. pytest is the only dependency, in the `dev` group. Do not add runtime dependencies.
+diffsplainer is a GitHub PR review app. It shows a PR's diff as chunks, with an explanation from a headless Claude Code run next to each chunk. At runtime the backend uses only the Python 3.11+ standard library. The browser UI is plain HTML, CSS and JavaScript in `src/diffsplainer/static/`. pytest is the only dependency, in the `dev` group. Do not add runtime dependencies.
 
 ## Commands
 
-- Run the app: `uv run fearful-owl`. The README lists the environment variables.
+- Run the app: `uv run diffsplainer`. The README lists the environment variables.
 - Run the tests: `uv run pytest`.
 - Check syntax: `uv run python -m compileall -q src`.
 - Lint: `uvx ruff check src tests`.
 
 ## Tests
 
-Write or change the test first and see it fail before you change the code. Tests live in `tests/` and replace GitHub (`fearful_owl.github` functions) and Claude (`explain_file`, `explain_overview`) with fakes. Tests of `run_claude` point `CLAUDE_BIN` at `tests/fake_claude.py`, which records its arguments, working directory and environment. They never call the network or the real `claude` CLI.
+Write or change the test first and see it fail before you change the code. Tests live in `tests/` and replace GitHub (`diffsplainer.github` functions) and Claude (`explain_file`, `explain_overview`) with fakes. Tests of `run_claude` point `CLAUDE_BIN` at `tests/fake_claude.py`, which records its arguments, working directory and environment. They never call the network or the real `claude` CLI.
 
 ## Layout
 
