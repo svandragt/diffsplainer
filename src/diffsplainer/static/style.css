@@ -3,6 +3,9 @@
   --add-bg: #e6ffec; --add-num: #ccffd8; --del-bg: #ffebe9; --del-num: #ffd7d5;
   --accent: #6639ba; --warn-bg: #fff8c5; --warn-border: #d4a72c; --hunk: #ddf4ff;
   --plus: #1a7f37; --minus: #cf222e;
+  /* Token colours keep at least 4.5:1 on --panel, --add-bg and --del-bg of their theme. */
+  --tok-keyword: #cf222e; --tok-string: #0a3069; --tok-comment: #57606a; --tok-number: #0550ae;
+  --tok-function: #6639ba; --tok-tag: #116329; --tok-attr: #953800; --tok-punct: var(--text);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -11,6 +14,8 @@
     --add-bg: #12261e; --add-num: #1b4721; --del-bg: #25171c; --del-num: #542426;
     --accent: #a371f7; --warn-bg: #272115; --warn-border: #9e6a03; --hunk: #121d2f;
     --plus: #3fb950; --minus: #ff7b72;
+    --tok-keyword: #ff7b72; --tok-string: #a5d6ff; --tok-comment: #8b949e; --tok-number: #79c0ff;
+    --tok-function: #d2a8ff; --tok-tag: #7ee787; --tok-attr: #ffa657;
   }
 }
 * { box-sizing: border-box; }
@@ -51,7 +56,7 @@ main { max-width: 1600px; margin: 0 auto; padding: 16px; }
   padding: 8px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px 8px 0 0; font-family: var(--mono); font-size: 13px; }
 .file-head .name { font-weight: 600; overflow-wrap: anywhere; }
 .file-head .stat { margin-left: auto; white-space: nowrap; }
-.tag { font-family: system-ui; font-size: 11px; padding: 0 6px; border: 1px solid var(--border); border-radius: 99px; color: var(--muted); }
+.file-head .tag { font-family: system-ui; font-size: 11px; padding: 0 6px; border: 1px solid var(--border); border-radius: 99px; color: var(--muted); }
 
 .row { display: grid; grid-template-columns: minmax(280px, 38%) 1fr; border: 1px solid var(--border); border-top: 0; background: var(--panel); }
 .row:last-child { border-radius: 0 0 8px 8px; }
@@ -82,6 +87,14 @@ main { max-width: 1600px; margin: 0 auto; padding: 16px; }
 .diff tr.add td { background: var(--add-bg); } .diff tr.add td.n { background: var(--add-num); }
 .diff tr.del td { background: var(--del-bg); } .diff tr.del td.n { background: var(--del-num); }
 .diff td.s::before { content: attr(data-m); display: inline-block; width: 1.2em; color: var(--muted); }
+.diff .token:is(.keyword, .atrule, .important) { color: var(--tok-keyword); }
+.diff .token:is(.string, .char, .attr-value, .regex, .url, .template-string) { color: var(--tok-string); }
+.diff .token:is(.comment, .prolog, .doctype, .cdata) { color: var(--tok-comment); }
+.diff .token:is(.number, .boolean, .constant, .symbol, .entity) { color: var(--tok-number); }
+.diff .token:is(.function, .class-name, .builtin) { color: var(--tok-function); }
+.diff .token:is(.tag, .selector) { color: var(--tok-tag); }
+.diff .token:is(.attr-name, .property) { color: var(--tok-attr); }
+.diff .token:is(.punctuation, .operator) { color: var(--tok-punct); }
 .nodiff { padding: 12px; color: var(--muted); grid-column: 1 / -1; }
 
 @media (max-width: 860px) {

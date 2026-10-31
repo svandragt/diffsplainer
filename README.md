@@ -38,6 +38,8 @@ To look up a word or phrase in an explanation, select it and click **Explain**. 
 
 Opening the same PR again reuses the explanations while its commits stay the same. The app drops them when it restarts, or when it makes room for newer PRs (it keeps 50). Editing the PR title or description does not refresh them.
 
+Code in the diff is syntax-highlighted for common languages, chosen by file extension.
+
 PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGED_LINES` to change the limit.
 
 ## Configuration

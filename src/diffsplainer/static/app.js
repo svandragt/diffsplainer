@@ -89,19 +89,53 @@ function render({ pr, files }) {
       <section class="card context" id="context"><h2>Context given to Claude</h2><div class="skeleton short"></div></section>
     </div>
     ${files.map(renderFile).join('')}`;
+  lazy.disconnect();
+  document.querySelectorAll('.diff[data-lang]').forEach((el) => lazy.observe(el));
 }
+
+// Prism language per file extension; other files stay plain. The grammars are in vendor/prism.js.
+const LANGS = {
+  go: 'go', py: 'python', php: 'php', c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp', hh: 'cpp',
+  css: 'css', scss: 'scss', js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'jsx', ts: 'typescript',
+  tsx: 'tsx', html: 'markup', htm: 'markup', xml: 'markup', svg: 'markup', gd: 'gdscript', json: 'json',
+  yml: 'yaml', yaml: 'yaml', sh: 'bash', bash: 'bash', md: 'markdown', rs: 'rust', java: 'java', rb: 'ruby', sql: 'sql',
+};
+const langOf = (name) => {
+  const ext = name.match(/\.([^./]+)$/)?.[1].toLowerCase();
+  return Object.hasOwn(LANGS, ext) ? LANGS[ext] : '';
+};
+const MAX_HIGHLIGHT_CHARS = 1000; // longer lines (minified code) stay plain: Prism's regexes slow down on them
+
+// Highlights one line at a time, so a multi-line comment or string is coloured line by line as code.
+// Prism.highlight escapes its input, so raw diff text never reaches innerHTML.
+function highlight(diff) {
+  const lang = diff.dataset.lang;
+  const grammar = Prism.languages[lang];
+  if (!grammar) return;
+  diff.querySelectorAll('td.s').forEach((td) => {
+    const line = td.textContent;
+    if (line && line.length <= MAX_HIGHLIGHT_CHARS) td.innerHTML = Prism.highlight(line, grammar, lang);
+  });
+}
+
+// Chunks are highlighted when they near the viewport, so a long PR costs nothing up front.
+const lazy = new IntersectionObserver((entries) => entries.forEach((e) => {
+  if (!e.isIntersecting) return;
+  lazy.unobserve(e.target);
+  highlight(e.target);
+}), { rootMargin: '200px' });
 
 function renderFile(f) {
   const rename = f.previous ? `<span class="tag">renamed from ${esc(f.previous)}</span>` : '';
   const head = `<div class="file-head"><span class="tag">${f.status}</span><span class="name">${esc(f.filename)}</span>${rename}
     <span class="stat"><span class="plus">+${f.additions}</span> <span class="minus">−${f.deletions}</span></span></div>`;
   const rows = f.chunks.length
-    ? f.chunks.map(renderChunk).join('')
+    ? f.chunks.map((c) => renderChunk(c, langOf(f.filename))).join('')
     : `<div class="row"><div class="nodiff">No textual diff (binary, too large, or rename only).</div></div>`;
   return `<section class="file">${head}${rows}</section>`;
 }
 
-function renderChunk(c) {
+function renderChunk(c, lang) {
   const body = c.lines
     .map((l) => {
       const m = l.t === 'add' ? '+' : l.t === 'del' ? '-' : ' ';
@@ -111,7 +145,7 @@ function renderChunk(c) {
   const scope = c.scope ? `<tr class="scope"><td colspan="3">${esc(c.scope)}</td></tr>` : '';
   return `<div class="row" id="${c.id}">
     <aside class="explain"><div class="inner"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton short"></div></div></aside>
-    <div class="diff"><table>${scope}${body}</table></div>
+    <div class="diff"${lang ? ` data-lang="${lang}"` : ''}><table>${scope}${body}</table></div>
   </div>`;
 }
 
