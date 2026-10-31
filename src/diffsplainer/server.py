@@ -118,8 +118,14 @@ def batches(file: dict) -> list[dict]:
 def git_commit() -> str | None:
     """Short SHA of the checkout the package runs from; None outside a checkout."""
     try:
-        r = subprocess.run(["git", "rev-parse", "--show-toplevel", "--short", "HEAD"], cwd=Path(__file__).parent,
-                           capture_output=True, text=True, timeout=2, check=False)
+        r = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel", "--short", "HEAD"],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     top, _, sha = r.stdout.strip().partition("\n")
@@ -336,7 +342,10 @@ class Handler(BaseHTTPRequestHandler):
         ctx = {"pr": data["pr"], "instructions": instructions, "related": related, "files": data["files"]}
         work = [b for f in data["files"] if f["chunks"] for b in batches(f)]
         total = len(work) + 1
-        send("status", {"message": f"Asking Claude Code to explain {len(work)} file batch(es)…", "done": 0, "total": total})
+        send(
+            "status",
+            {"message": f"Asking Claude Code to explain {len(work)} file batch(es)…", "done": 0, "total": total},
+        )
 
         def overview_task():
             if gone.is_set():

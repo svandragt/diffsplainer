@@ -137,7 +137,11 @@ def test_term_schema_asks_for_general_meaning_and_meaning_here():
 
 def _capture_prompt(monkeypatch):
     seen = {}
-    monkeypatch.setattr(claude, "run_claude", lambda prompt, schema, cancel=None: seen.update(prompt=prompt, schema=schema, cancel=cancel))
+    monkeypatch.setattr(
+        claude,
+        "run_claude",
+        lambda prompt, schema, cancel=None: seen.update(prompt=prompt, schema=schema, cancel=cancel),
+    )
     return seen
 
 
