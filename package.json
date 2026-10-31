@@ -1,9 +1,0 @@
-{
-  "name": "fearful-owl",
-  "version": "0.1.0",
-  "description": "GitHub PR review app: diff chunks with aligned explanations from Claude Code",
-  "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "engines": { "node": ">=18" },
-  "license": "GPL-3.0"
-}

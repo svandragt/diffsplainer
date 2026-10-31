@@ -6,12 +6,14 @@ Open a PR and the app shows its diff split into logical chunks on the right. On 
 
 ## Run
 
-Requirements: Node 18+ and the [Claude Code](https://claude.com/claude-code) CLI (`claude`), logged in.
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and the [Claude Code](https://claude.com/claude-code) CLI (`claude`), logged in.
 
 ```sh
 export GITHUB_TOKEN=ghp_...   # optional for public repos, required for private ones
-npm start                     # http://localhost:3000
+uv run fearful-owl            # http://localhost:3000
 ```
+
+Without uv: `PYTHONPATH=src python -m fearful_owl`.
 
 Open a PR in either of these ways:
 
@@ -41,4 +43,4 @@ The address bar always shows the PR you're reviewing, so links can be shared. Ad
 | `CLAUDE_CONCURRENCY` | `3` | Parallel Claude calls |
 | `CLAUDE_TIMEOUT_MS` | `240000` | Timeout for each Claude call |
 
-There are no npm dependencies.
+The app uses only the Python standard library. The browser UI is plain HTML/CSS/JS in `src/fearful_owl/static/`.

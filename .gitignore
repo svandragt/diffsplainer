@@ -3,3 +3,6 @@ cache-downloads
 inspector
 api
 source/inspector.html
+__pycache__/
+*.pyc
+.venv/
