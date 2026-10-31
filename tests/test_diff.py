@@ -1,4 +1,4 @@
-from fearful_owl.diff import LONG_HUNK, parse_hunks, split_hunk
+from diffsplainer.diff import LONG_HUNK, parse_hunks, split_hunk
 
 
 def test_trailing_newline_adds_no_context_line():

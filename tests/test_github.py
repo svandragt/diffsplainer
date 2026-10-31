@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from fearful_owl import github
+from diffsplainer import github
 
 
 @pytest.fixture(autouse=True)

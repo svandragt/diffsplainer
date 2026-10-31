@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from fearful_owl import claude
+from diffsplainer import claude
 
 FAKE = Path(__file__).with_name("fake_claude.py")
 LINE = {"t": "add", "o": None, "n": 1, "s": "x"}
@@ -47,7 +47,7 @@ def test_model_defaults_to_sonnet(fake):
     assert argv[argv.index("--model") + 1] == claude.MODEL
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_MODEL"}
     out = subprocess.run(
-        [sys.executable, "-c", "from fearful_owl import claude; print(claude.MODEL)"],
+        [sys.executable, "-c", "from diffsplainer import claude; print(claude.MODEL)"],
         env=env,
         capture_output=True,
         text=True,

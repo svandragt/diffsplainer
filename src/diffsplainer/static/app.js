@@ -27,7 +27,7 @@ function fromLocation() {
     if (source) source.close();
     source = null;
     urlInput.value = '';
-    document.title = 'Fearful Owl · PR review';
+    document.title = 'Diffsplainer · PR review';
     app.innerHTML = emptyHtml;
     return;
   }
@@ -59,7 +59,7 @@ async function load({ owner, repo, num }) {
     app.innerHTML = `<div class="card">Could not load PR: ${esc(data.error)}</div>`;
     return;
   }
-  document.title = `#${data.pr.number} ${data.pr.title} · Fearful Owl`;
+  document.title = `#${data.pr.number} ${data.pr.title} · Diffsplainer`;
   render(data);
   explain(owner, repo, num);
 }

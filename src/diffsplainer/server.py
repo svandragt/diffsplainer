@@ -213,7 +213,7 @@ class Handler(BaseHTTPRequestHandler):
                 "error",
                 {
                     "scope": "limit",
-                    "message": f"This PR changes {changed} lines. Fearful Owl explains PRs up to "
+                    "message": f"This PR changes {changed} lines. Diffsplainer explains PRs up to "
                     f"{MAX_CHANGED_LINES} changed lines, so the diff is shown without explanations.",
                 },
             )
