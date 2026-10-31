@@ -6,6 +6,8 @@ import json
 import mimetypes
 import os
 import re
+import select
+import socket
 import threading
 import time
 from collections import OrderedDict
@@ -15,12 +17,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import github as gh
-from .claude import explain_file, explain_overview
+from .claude import ClaudeCancelled, explain_file, explain_overview
 from .context import project_instructions, related_pulls
 from .diff import chunk_files
 
 PORT = int(os.environ.get("PORT", "3000"))
-CONCURRENCY = int(os.environ.get("CLAUDE_CONCURRENCY", "3"))
+CONCURRENCY = int(os.environ.get("CLAUDE_CONCURRENCY", "6"))
 MAX_CHANGED_LINES = int(os.environ.get("MAX_CHANGED_LINES", "1000"))
 MAX_PRS = 10
 BATCH_CHUNKS = 12
@@ -28,6 +30,7 @@ BATCH_LINES = 400
 PR_TTL_S = 60
 PR_CACHE_SIZE = 50
 EXPLAIN_CACHE_SIZE = 50
+WATCH_INTERVAL_S = 0.5
 STATIC = Path(__file__).parent / "static"
 
 PR_RE = re.compile(r"^/api/pr/([\w.-]+)/([\w.-]+)/(\d+)$")
@@ -98,6 +101,18 @@ def batches(file: dict) -> list[dict]:
 
 class ClientGone(Exception):
     pass
+
+
+def watch_disconnect(sock: socket.socket, gone: threading.Event, stop: threading.Event):
+    """Set `gone` once the client closes `sock`. The peek leaves pending request bytes unread."""
+    while not stop.wait(WATCH_INTERVAL_S):
+        try:
+            if select.select([sock], [], [], 0)[0] and not sock.recv(1, socket.MSG_PEEK):
+                gone.set()
+        except (OSError, ValueError):  # ValueError: the handler closed the socket under us
+            gone.set()
+        if gone.is_set():
+            return
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -176,6 +191,8 @@ class Handler(BaseHTTPRequestHandler):
                     gone.set()
                     raise ClientGone from None
 
+        stop = threading.Event()
+        threading.Thread(target=watch_disconnect, args=(self.connection, gone, stop), daemon=True).start()
         try:
             self._explain(owner, repo, num, pr_limit, send, gone)
         except ClientGone:
@@ -185,6 +202,8 @@ class Handler(BaseHTTPRequestHandler):
                 send("error", {"scope": "fatal", "message": str(e)})
             except ClientGone:
                 pass
+        finally:
+            stop.set()
 
     def _explain(self, owner, repo, num, pr_limit, send, gone):
         data = load_pr(owner, repo, num)
@@ -237,10 +256,12 @@ class Handler(BaseHTTPRequestHandler):
             if gone.is_set():
                 return
             try:
-                emit("overview", explain_overview(ctx, data["files"]))
+                emit("overview", explain_overview(ctx, data["files"], gone))
                 return True
             except ClientGone:
                 raise
+            except ClaudeCancelled:
+                return
             except Exception as e:
                 send("error", {"scope": "overview", "message": str(e)})
                 return False
@@ -249,7 +270,9 @@ class Handler(BaseHTTPRequestHandler):
             if gone.is_set():
                 return
             try:
-                out = explain_file(ctx, file)
+                out = explain_file(ctx, file, gone)
+            except ClaudeCancelled:
+                return
             except Exception as e:
                 send("error", {"scope": "file", "ids": [c["id"] for c in file["chunks"]], "message": str(e)})
                 return False
