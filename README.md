@@ -24,7 +24,7 @@ Open a PR in either of these ways:
 
 To open any GitHub PR with one click, drag the Diffsplain link from the start page to your bookmarks bar, then click it on a PR page.
 
-The address bar always shows the PR you're reviewing, so links can be shared. Add `?prs=N` to choose how many previous PRs go into the context (0–10, default 3).
+The address bar always shows the PR you're reviewing, so links can be shared. To change how many related PRs Claude reads, add `?prs=N` (0–10, default 3) to the address.
 
 ## How it works
 
