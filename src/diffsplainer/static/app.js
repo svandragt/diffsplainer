@@ -235,6 +235,7 @@ async function askTerm({ text, around, chunk }, a) {
 
 function onSelect(e) {
   if (e.type === 'keyup' && !(e.shiftKey || e.key === 'Shift')) return; // only keys that extend a selection
+  if (e.type === 'keyup' && (e.target.matches?.('input, textarea, select') || e.target.isContentEditable)) return; // typing is not selecting
   closePop();
   popOpener = document.activeElement === document.body ? null : document.activeElement;
   const sel = getSelection();
@@ -250,7 +251,7 @@ function onSelect(e) {
   const a = { x: end.right + scrollX, top: end.top + scrollY, bottom: end.bottom + scrollY };
   if (text.length > 300) return mount(make('<div class="term-float term-note" role="status">Select less text</div>'), a);
   const btn = make('<button class="term-float term-btn">Explain</button>');
-  const around = (inner.closest('p') || host).textContent.replace(/\s+/g, ' ').trim();
+  const around = (inner.closest('p') || host).textContent.replace(/\s+/g, ' ').trim().slice(0, 4000); // the server rejects more
   btn.addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
   btn.addEventListener('click', () => askTerm({ text, around, chunk: host.closest('.row')?.id }, a));
   mount(btn, a);

@@ -48,7 +48,7 @@ TERM_RE = re.compile(r"^/api/explain-term/([\w.-]+)/([\w.-]+)/(\d+)$")
 
 _pr_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _explain_cache: OrderedDict[str, list] = OrderedDict()
-_term_cache: OrderedDict[str, dict] = OrderedDict()
+_term_cache: OrderedDict[tuple, dict] = OrderedDict()
 _cache_lock = threading.Lock()
 
 
@@ -200,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
             chunk = next((c for f in data["files"] for c in f["chunks"] if c["id"] == chunk_id), None)
             if chunk is None:
                 return self.send_json(404, {"error": f"Unknown chunk {chunk_id}"})
-        key = f"{owner}/{repo}/{num}@{data['pr']['headSha']}:{chunk_id or ''}:{text}:{around}"
+        key = (owner, repo, num, data["pr"]["baseSha"], data["pr"]["headSha"], chunk_id or "", text, around)
         with _cache_lock:
             answer = _term_cache.get(key)
             if answer:
@@ -210,12 +210,13 @@ class Handler(BaseHTTPRequestHandler):
 
         gone, stop = threading.Event(), threading.Event()
         threading.Thread(target=watch_disconnect, args=(self.connection, gone, stop), daemon=True).start()
-        ctx = {"pr": data["pr"], "instructions": [], "related": [], "files": data["files"]}
         try:
-            answer = explain_term(ctx, chunk, text, around, gone)
+            answer = explain_term({"pr": data["pr"], "files": data["files"]}, chunk, text, around, gone)
         except ClaudeCancelled:
             return
         except ClaudeError as e:
+            return self.send_json(502, {"error": str(e)})
+        except Exception as e:
             return self.send_json(502, {"error": str(e)})
         finally:
             stop.set()
@@ -223,7 +224,10 @@ class Handler(BaseHTTPRequestHandler):
             _term_cache[key] = answer
             while len(_term_cache) > TERM_CACHE_SIZE:
                 _term_cache.popitem(last=False)
-        self.send_json(200, answer)
+        try:
+            self.send_json(200, answer)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def api_explain(self, owner: str, repo: str, num: int, pr_limit: int):
         self.send_response(200)

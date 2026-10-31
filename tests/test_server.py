@@ -1,5 +1,6 @@
 import json
 import socket
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -185,7 +186,7 @@ def test_pr_cache_drops_expired_entry_when_seen(monkeypatch):
 @pytest.fixture
 def term(monkeypatch):
     server._term_cache.clear()
-    fake = SimpleNamespace(pr=make_pr(), calls=[], error=None)
+    fake = SimpleNamespace(pr=make_pr(), calls=[], error=None, unhandled=[])
 
     def explain_term(ctx, chunk, text, around, cancel=None):
         fake.calls.append(SimpleNamespace(ctx=ctx, chunk=chunk, text=text, around=around, cancel=cancel))
@@ -197,6 +198,7 @@ def term(monkeypatch):
     monkeypatch.setattr(server, "explain_term", explain_term)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     httpd.daemon_threads = True
+    httpd.handle_error = lambda *_: fake.unhandled.append(sys.exc_info()[1])
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
     def get(**params):
@@ -260,13 +262,26 @@ def test_term_answer_is_cached_per_head_chunk_text_and_paragraph(term):
     assert len(term.calls) == 5
 
 
+def test_term_cache_does_not_mix_up_requests_whose_text_and_paragraph_join_to_the_same_string(term):
+    term.get(text="a:b", around="c")
+    term.get(text="a", around="b:c")
+    assert len(term.calls) == 2
+
+
+def test_term_answer_is_not_reused_for_the_same_head_on_a_different_base(term):
+    term.get(text="term")
+    term.pr = make_pr(base="b2")
+    term.get(text="term")
+    assert len(term.calls) == 2
+
+
 def test_term_cache_drops_least_recently_used_answer(term, monkeypatch):
     monkeypatch.setattr(server, "TERM_CACHE_SIZE", 2)
     for text in ("a", "b"):
         term.get(text=text)
     term.get(text="a")  # cache hit moves a to the end
     term.get(text="c")
-    assert [k.split(":")[-2] for k in server._term_cache] == ["a", "c"]
+    assert [k[-2] for k in server._term_cache] == ["a", "c"]
 
 
 def test_term_claude_error_is_a_502_and_is_not_cached(term):
@@ -275,6 +290,24 @@ def test_term_claude_error_is_a_502_and_is_not_cached(term):
     term.error = None
     assert term.get(text="term")[0] == 200
     assert len(term.calls) == 2
+
+
+def test_term_unexpected_claude_failure_is_a_502_with_an_error_message(term):
+    term.error = KeyError("result")
+    status, body = term.get(text="term")
+    assert status == 502 and body["error"]
+    assert not term.unhandled
+
+
+@pytest.mark.parametrize("error", [BrokenPipeError, ConnectionResetError])
+def test_term_client_gone_before_the_reply_is_sent_is_not_an_error(term, monkeypatch, error):
+    def gone(*_):
+        raise error
+
+    monkeypatch.setattr(server.Handler, "send_body", gone)
+    with pytest.raises(ConnectionError):  # the handler wrote nothing, so the client sees a closed connection
+        term.get(text="term")
+    assert not term.unhandled
 
 
 def test_term_load_failure_is_a_500_with_an_error_message(term, monkeypatch):
