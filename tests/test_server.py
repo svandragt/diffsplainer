@@ -388,12 +388,20 @@ def _status(serve, path: str, **headers) -> int:
     return res.status
 
 
-@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "[::1]"])
+@pytest.mark.parametrize("host", ["localhost:{port}", "127.0.0.1:{port}", "[::1]:{port}", "LocalHost:{port}"])
 def test_local_host_names_are_served(serve, host):
-    assert _status(serve, "/api/version", Host=f"{host}:{serve.server_port}") == 200
+    assert _status(serve, "/api/version", Host=host.format(port=serve.server_port)) == 200
 
 
-@pytest.mark.parametrize("host", ["attacker.example:{port}", "localhost:1", "localhost.attacker.example:{port}", ""])
+@pytest.mark.parametrize("host", ["localhost:8000", "localhost", "[::1]"])
+def test_local_host_on_another_port_is_served(serve, host):
+    # an SSH tunnel (ssh -L 8000:localhost:3000) or port 80 changes the port the browser sends
+    assert _status(serve, "/api/version", Host=host) == 200
+
+
+@pytest.mark.parametrize(
+    "host", ["attacker.example:{port}", "localhost.attacker.example:{port}", "attacker.example", ""]
+)
 def test_foreign_host_header_is_refused(serve, host):
     # a DNS-rebinding page sends its own domain as Host; refusing it keeps other sites from reading private PRs
     assert _status(serve, "/api/version", Host=host.format(port=serve.server_port)) == 403
@@ -401,8 +409,13 @@ def test_foreign_host_header_is_refused(serve, host):
 
 
 @pytest.mark.parametrize("site", ["cross-site", "same-site"])
-def test_api_request_from_another_site_is_refused(serve, site):
-    assert _status(serve, "/api/version", Sec_Fetch_Site=site) == 403
+@pytest.mark.parametrize("path", ["/api/version", "/api/explain/o/r/1", "/api/explain-term/o/r/1?text=x"])
+def test_api_request_from_another_site_is_refused(monkeypatch, serve, site, path):
+    calls = []
+    monkeypatch.setattr(server, "load_pr", lambda *a: calls.append(a) or {})
+    monkeypatch.setattr(server.Handler, "api_explain", lambda self, *a: calls.append(a) or self.send_json(200, {}))
+    assert _status(serve, path, Sec_Fetch_Site=site) == 403
+    assert calls == []
 
 
 @pytest.mark.parametrize("site", ["same-origin", "none"])
@@ -420,5 +433,5 @@ def test_dot_segments_are_not_owner_or_repo_names(monkeypatch, serve, path):
     calls = []
     monkeypatch.setattr(server, "load_pr", lambda *a: calls.append(a) or {})
     monkeypatch.setattr(server.Handler, "api_explain", lambda self, *a: calls.append(a) or self.send_json(200, {}))
-    _status(serve, path)
+    assert _status(serve, path) == 200  # the app shell, not an API answer
     assert calls == []

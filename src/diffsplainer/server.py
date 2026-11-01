@@ -137,6 +137,12 @@ def git_commit() -> str | None:
     return sha or None if ours else None
 
 
+def host_name(host: str) -> str:
+    """The Host header without its port, lowercased. The port is ignored because SSH tunnels change it."""
+    name, colon, port = host.rpartition(":")
+    return (name if colon and port.isdigit() else host).lower()
+
+
 class ClientGone(Exception):
     pass
 
@@ -166,7 +172,7 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(url.path)
         # A DNS-rebinding page sends its own domain as Host, and any page can send cross-site API requests that start
         # paid Claude runs; the bookmarklet only navigates to a page, so it still works.
-        if self.headers.get("Host") not in {f"{h}:{self.server.server_port}" for h in LOCAL_HOSTS}:
+        if host_name(self.headers.get("Host", "")) not in LOCAL_HOSTS:
             return self.send_json(403, {"error": "Diffsplainer only answers requests to localhost"})
         if path.startswith("/api/") and self.headers.get("Sec-Fetch-Site", "none") not in ("same-origin", "none"):
             return self.send_json(403, {"error": "Diffsplainer only answers API requests from its own pages"})
