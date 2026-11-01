@@ -26,6 +26,14 @@ Write or change the test first and see it fail before you change the code. Tests
 - `server.py` serves the API, the static files and the caches.
 - `static/vendor/` holds the vendored Prism (`prism.js`) and its licence (`prism-LICENSE.txt`).
 
+## Releasing
+
+1. Bump `version` in `pyproject.toml`.
+2. Merge the change to `main`.
+3. Tag `vX.Y.Z` on `main` and push the tag.
+4. The release workflow publishes to PyPI through trusted publishing (environment `pypi`) and creates the GitHub release.
+5. Write the release notes afterwards with `gh release edit <tag> --notes-file <file>`.
+
 ## How it works
 
 1. **Diff.** `get_pull_files` requests pages of 100 files until GitHub returns a short page, up to 30 pages, which is GitHub's limit of 3000 files per PR. Each hunk becomes a chunk. A hunk of more than 30 lines is split at runs of unchanged lines, or, for long runs of additions or deletions, at top-level blocks.
