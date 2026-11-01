@@ -4,6 +4,8 @@ Diff explanations for GitHub pull requests, powered by Claude Code.
 
 Open a PR and the app shows its diff split into logical chunks on the right. On the left, next to each chunk, is Claude's explanation of **what** the change does, **why** it's made, and anything worth checking.
 
+![Diffsplainer showing a pull request's overview, and a diff chunk with its explanation beside it](https://raw.githubusercontent.com/svandragt/diffsplainer/main/docs/screenshot.png)
+
 ## Run
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and the [Claude Code](https://claude.com/claude-code) CLI (`claude`), logged in.
