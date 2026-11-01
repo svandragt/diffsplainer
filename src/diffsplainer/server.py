@@ -46,9 +46,12 @@ MAX_AROUND_CHARS = 4000
 WATCH_INTERVAL_S = 0.5
 STATIC = Path(__file__).parent / "static"
 
-PR_RE = re.compile(r"^/api/pr/([\w.-]+)/([\w.-]+)/(\d+)$")
-EXPLAIN_RE = re.compile(r"^/api/explain/([\w.-]+)/([\w.-]+)/(\d+)$")
-TERM_RE = re.compile(r"^/api/explain-term/([\w.-]+)/([\w.-]+)/(\d+)$")
+# `.` and `..` would turn the GitHub API path into a different endpoint
+_REPO = r"((?!\.\.?/)[\w.-]+)/((?!\.\.?/)[\w.-]+)/(\d+)$"
+PR_RE = re.compile(r"^/api/pr/" + _REPO)
+EXPLAIN_RE = re.compile(r"^/api/explain/" + _REPO)
+TERM_RE = re.compile(r"^/api/explain-term/" + _REPO)
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
 
 _pr_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _explain_cache: OrderedDict[str, list] = OrderedDict()
@@ -134,6 +137,12 @@ def git_commit() -> str | None:
     return sha or None if ours else None
 
 
+def host_name(host: str) -> str:
+    """The Host header without its port, lowercased. The port is ignored because SSH tunnels change it."""
+    name, colon, port = host.rpartition(":")
+    return (name if colon and port.isdigit() else host).lower()
+
+
 class ClientGone(Exception):
     pass
 
@@ -161,6 +170,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         path = unquote(url.path)
+        # A DNS-rebinding page sends its own domain as Host, and any page can send cross-site API requests that start
+        # paid Claude runs; the bookmarklet only navigates to a page, so it still works.
+        if host_name(self.headers.get("Host", "")) not in LOCAL_HOSTS:
+            return self.send_json(403, {"error": "Diffsplainer only answers requests to localhost"})
+        if path.startswith("/api/") and self.headers.get("Sec-Fetch-Site", "none") not in ("same-origin", "none"):
+            return self.send_json(403, {"error": "Diffsplainer only answers API requests from its own pages"})
         if path == "/api/version":
             try:
                 ver = package_version("diffsplainer")

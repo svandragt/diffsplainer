@@ -372,3 +372,66 @@ def test_commit_is_null_when_checkout_is_another_repo(monkeypatch):
         assert server.git_commit() is None
     finally:
         server.git_commit.cache_clear()
+
+
+def _status(serve, path: str, **headers) -> int:
+    import http.client
+
+    conn = http.client.HTTPConnection("127.0.0.1", serve.server_port, timeout=5)
+    conn.putrequest("GET", path, skip_host="Host" in headers)
+    for k, v in headers.items():
+        conn.putheader(k.replace("_", "-"), v)
+    conn.endheaders()
+    res = conn.getresponse()
+    res.read()  # closing with the body unread resets the connection, which the server logs as an error
+    conn.close()
+    return res.status
+
+
+@pytest.mark.parametrize("host", ["localhost:{port}", "127.0.0.1:{port}", "[::1]:{port}", "LocalHost:{port}"])
+def test_local_host_names_are_served(serve, host):
+    assert _status(serve, "/api/version", Host=host.format(port=serve.server_port)) == 200
+
+
+@pytest.mark.parametrize("host", ["localhost:8000", "localhost", "[::1]"])
+def test_local_host_on_another_port_is_served(serve, host):
+    # an SSH tunnel (ssh -L 8000:localhost:3000) or port 80 changes the port the browser sends
+    assert _status(serve, "/api/version", Host=host) == 200
+
+
+@pytest.mark.parametrize(
+    "host", ["attacker.example:{port}", "localhost.attacker.example:{port}", "attacker.example", ""]
+)
+def test_foreign_host_header_is_refused(serve, host):
+    # a DNS-rebinding page sends its own domain as Host; refusing it keeps other sites from reading private PRs
+    assert _status(serve, "/api/version", Host=host.format(port=serve.server_port)) == 403
+    assert _status(serve, "/owner/repo/pull/1", Host=host.format(port=serve.server_port)) == 403
+
+
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+@pytest.mark.parametrize("path", ["/api/version", "/api/explain/o/r/1", "/api/explain-term/o/r/1?text=x"])
+def test_api_request_from_another_site_is_refused(monkeypatch, serve, site, path):
+    calls = []
+    monkeypatch.setattr(server, "load_pr", lambda *a: calls.append(a) or {})
+    monkeypatch.setattr(server.Handler, "api_explain", lambda self, *a: calls.append(a) or self.send_json(200, {}))
+    assert _status(serve, path, Sec_Fetch_Site=site) == 403
+    assert calls == []
+
+
+@pytest.mark.parametrize("site", ["same-origin", "none"])
+def test_api_request_from_the_app_itself_is_served(serve, site):
+    assert _status(serve, "/api/version", Sec_Fetch_Site=site) == 200
+
+
+def test_page_opened_from_another_site_is_served(serve):
+    # the bookmarklet navigates from github.com to the app
+    assert _status(serve, "/owner/repo/pull/1", Sec_Fetch_Site="cross-site") == 200
+
+
+@pytest.mark.parametrize("path", ["/api/pr/../x/1", "/api/pr/o/../1", "/api/pr/o/./1", "/api/explain/../x/1"])
+def test_dot_segments_are_not_owner_or_repo_names(monkeypatch, serve, path):
+    calls = []
+    monkeypatch.setattr(server, "load_pr", lambda *a: calls.append(a) or {})
+    monkeypatch.setattr(server.Handler, "api_explain", lambda self, *a: calls.append(a) or self.send_json(200, {}))
+    assert _status(serve, path) == 200  # the app shell, not an API answer
+    assert calls == []
