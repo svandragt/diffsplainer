@@ -17,6 +17,10 @@ diffsplainer is a GitHub PR review app. It shows a PR's diff as chunks, with an 
 
 Write or change the test first and see it fail before you change the code. Tests live in `tests/` and replace GitHub (`diffsplainer.github` functions) and Claude (`explain_file`, `explain_overview`, `explain_term`) with fakes. Tests of `run_claude` point `CLAUDE_BIN` at `tests/fake_claude.py`, which records its arguments, working directory and environment and answers each schema the app sends (term, chunk batch, overview) with fake text. They never call the network or the real `claude` CLI. Browser checks can run the app with `CLAUDE_BIN=$PWD/tests/fake_claude.py` to avoid real Claude calls.
 
+## Dependency updates
+
+Dependabot opens weekly grouped updates for GitHub Actions and uv. Patch and minor updates auto-merge once the required CI checks pass; major updates wait for a human.
+
 ## Layout
 
 - `diff.py` parses GitHub patches into chunks.
