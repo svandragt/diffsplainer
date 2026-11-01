@@ -6,6 +6,22 @@ readme = "README.md"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.11"
 dependencies = []
+authors = [{ name = "Sander van Dragt", email = "sander@vandragt.com" }]
+keywords = ["github", "pull-request", "code-review", "claude", "diff"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Homepage = "https://github.com/svandragt/diffsplainer"
+Repository = "https://github.com/svandragt/diffsplainer"
+Issues = "https://github.com/svandragt/diffsplainer/issues"
 
 [project.scripts]
 diffsplainer = "diffsplainer.server:main"
