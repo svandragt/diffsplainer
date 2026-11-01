@@ -9,12 +9,12 @@ Open a PR and the app shows its diff split into logical chunks on the right. On 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and the [Claude Code](https://claude.com/claude-code) CLI (`claude`), logged in.
 
 ```sh
-uv run diffsplainer            # http://localhost:3000
+uvx diffsplainer
 ```
 
-Private repos need you to be logged in with the GitHub CLI (`gh auth login`), or to set `GITHUB_TOKEN`. If you log in with `gh` after starting the app, restart it.
+Then open <http://localhost:3000>.
 
-Without uv: `PYTHONPATH=src python -m diffsplainer`.
+Private repos need you to be logged in with the GitHub CLI (`gh auth login`), or to set `GITHUB_TOKEN`. If you log in with `gh` after starting the app, restart it.
 
 Open a PR in either of these ways:
 
@@ -56,3 +56,15 @@ PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGE
 | `MAX_CHANGED_LINES` | `1000` | Largest PR (additions plus deletions) that gets explanations |
 
 The app uses only the Python standard library. The browser UI is plain HTML/CSS/JS in `src/diffsplainer/static/`.
+
+## Development
+
+To run the app from a clone of the repository:
+
+```sh
+git clone https://github.com/svandragt/diffsplainer
+cd diffsplainer
+uv run diffsplainer            # http://localhost:3000
+```
+
+Without uv: `PYTHONPATH=src python -m diffsplainer`.
