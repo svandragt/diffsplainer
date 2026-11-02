@@ -8,7 +8,7 @@ diffsplainer is a GitHub PR review app. It shows a PR's diff as chunks, with an 
 
 ## Commands
 
-- Run the app: `uv run diffsplainer`. The README lists the environment variables.
+- Run the app: `uv run diffsplainer`, or `uv run diffsplainer <PR URL>` to also open that PR in the browser. The README lists the environment variables.
 - Run the tests: `uv run pytest`.
 - Check syntax: `uv run python -m compileall -q src`.
 - Lint and format: `uv run ruff check` and `uv run ruff format`.

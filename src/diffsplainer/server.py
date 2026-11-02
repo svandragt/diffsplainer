@@ -9,8 +9,10 @@ import re
 import select
 import socket
 import subprocess
+import sys
 import threading
 import time
+import webbrowser
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import cache
@@ -51,6 +53,8 @@ _REPO = r"((?!\.\.?/)[\w.-]+)/((?!\.\.?/)[\w.-]+)/(\d+)$"
 PR_RE = re.compile(r"^/api/pr/" + _REPO)
 EXPLAIN_RE = re.compile(r"^/api/explain/" + _REPO)
 TERM_RE = re.compile(r"^/api/explain-term/" + _REPO)
+# Any host, so GitHub Enterprise PR URLs work like they do in the bookmarklet
+CLI_PR_RE = re.compile(r"(?:^|/)((?!\.\.?/)[\w.-]+)/((?!\.\.?/)[\w.-]+)/pull/(\d+)(?:[/?#]|$)")
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
 
 _pr_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
@@ -416,11 +420,25 @@ class Handler(BaseHTTPRequestHandler):
         send("done", {})
 
 
+def pr_path(arg: str) -> str | None:
+    m = CLI_PR_RE.search(arg)
+    return m and f"/{m[1]}/{m[2]}/pull/{m[3]}"
+
+
 def main():
+    path = None
+    if len(sys.argv) > 1:
+        path = pr_path(sys.argv[1])
+        if not path:
+            sys.exit(
+                f"Not a pull request URL: {sys.argv[1]}\nUsage: diffsplainer [https://github.com/owner/repo/pull/123]"
+            )
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     server.daemon_threads = True
     print(f"PR review app on http://localhost:{PORT}")
     print(f"Open e.g. http://localhost:{PORT}/owner/repo/pull/123")
+    if path:
+        webbrowser.open(f"http://localhost:{PORT}{path}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
