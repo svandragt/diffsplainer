@@ -18,8 +18,10 @@ Then open <http://localhost:3000>.
 
 Private repos need you to be logged in with the GitHub CLI (`gh auth login`), or to set `GITHUB_TOKEN`. If you log in with `gh` after starting the app, restart it.
 
-Open a PR in either of these ways:
+Open a PR in any of these ways:
 
+- pass the PR URL when you start the app, which opens it in your browser:
+  `uvx diffsplainer https://github.com/owner/repo/pull/123`
 - paste the PR URL into the address field, or
 - swap `github.com` for the app's host in the browser address bar:
   `http://localhost:3000/owner/repo/pull/123`

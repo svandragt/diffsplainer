@@ -435,3 +435,21 @@ def test_dot_segments_are_not_owner_or_repo_names(monkeypatch, serve, path):
     monkeypatch.setattr(server.Handler, "api_explain", lambda self, *a: calls.append(a) or self.send_json(200, {}))
     assert _status(serve, path) == 200  # the app shell, not an API answer
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "arg, path",
+    [
+        (
+            "https://github.com/wpcomvip/wikimediafoundation-org/pull/1197",
+            "/wpcomvip/wikimediafoundation-org/pull/1197",
+        ),
+        ("https://github.com/o/r/pull/12/files?w=1", "/o/r/pull/12"),
+        ("github.com/o/r/pull/12", "/o/r/pull/12"),
+        ("https://github.com/o/r/issues/12", None),
+        ("https://github.com/../r/pull/12", None),
+        ("nonsense", None),
+    ],
+)
+def test_pr_path(arg, path):
+    assert server.pr_path(arg) == path
