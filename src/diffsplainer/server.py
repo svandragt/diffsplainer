@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import github as gh
+from . import local, review
 from .claude import (
     ClaudeCancelled,
     ClaudeError,
@@ -30,8 +31,8 @@ from .claude import (
     explain_overview,
     explain_term,
 )
-from .context import project_instructions, related_pulls
-from .diff import chunk_files
+from .context import local_instructions, project_instructions, related_pulls
+from .diff import chunk_files, tree_order
 
 PORT = int(os.environ.get("PORT", "3000"))
 CONCURRENCY = int(os.environ.get("CLAUDE_CONCURRENCY", "6"))
@@ -45,6 +46,7 @@ EXPLAIN_CACHE_SIZE = 50
 TERM_CACHE_SIZE = 200
 MAX_TERM_CHARS = 300
 MAX_AROUND_CHARS = 4000
+MAX_REVIEW_BYTES = 256 * 1024
 WATCH_INTERVAL_S = 0.5
 STATIC = Path(__file__).parent / "static"
 
@@ -53,20 +55,16 @@ _REPO = r"((?!\.\.?/)[\w.-]+)/((?!\.\.?/)[\w.-]+)/(\d+)$"
 PR_RE = re.compile(r"^/api/pr/" + _REPO)
 EXPLAIN_RE = re.compile(r"^/api/explain/" + _REPO)
 TERM_RE = re.compile(r"^/api/explain-term/" + _REPO)
+LOCAL_ROUTES = ("/api/local", "/api/local/explain", "/api/review")
 # Any host, so GitHub Enterprise PR URLs work like they do in the bookmarklet
 CLI_PR_RE = re.compile(r"(?:^|/)((?!\.\.?/)[\w.-]+)/((?!\.\.?/)[\w.-]+)/pull/(\d+)(?:[/?#]|$)")
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
+LOCAL_REPO: Path | None = None  # set by `--local`: the one repository the review routes read and write
 
 _pr_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _explain_cache: OrderedDict[str, list] = OrderedDict()
 _term_cache: OrderedDict[tuple, dict] = OrderedDict()
 _cache_lock = threading.Lock()
-
-
-def tree_order(path: str) -> list[tuple[int, str]]:
-    """Sort key for GitHub's file-tree order: directories before files, case-insensitive."""
-    *dirs, name = path.split("/")
-    return [(0, d.casefold()) for d in dirs] + [(1, name.casefold())]
 
 
 def load_pr(owner: str, repo: str, num: int) -> dict:
@@ -177,13 +175,20 @@ class Handler(BaseHTTPRequestHandler):
             # the query string holds the selected text and paragraph from private PRs
             super().log_message(fmt, *(re.sub(r"\?\S*", "", a) if isinstance(a, str) else a for a in args))
 
+    def host_allowed(self) -> bool:
+        """True for a local Host header; otherwise answers 403 and returns False."""
+        if host_name(self.headers.get("Host", "")) in LOCAL_HOSTS:
+            return True
+        self.send_json(403, {"error": "Diffsplainer only answers requests to localhost"})
+        return False
+
     def do_GET(self):
         url = urlparse(self.path)
         path = unquote(url.path)
         # A DNS-rebinding page sends its own domain as Host, and any page can send cross-site API requests that start
         # paid Claude runs; the bookmarklet only navigates to a page, so it still works.
-        if host_name(self.headers.get("Host", "")) not in LOCAL_HOSTS:
-            return self.send_json(403, {"error": "Diffsplainer only answers requests to localhost"})
+        if not self.host_allowed():
+            return
         if path.startswith("/api/") and self.headers.get("Sec-Fetch-Site", "none") not in ("same-origin", "none"):
             return self.send_json(403, {"error": "Diffsplainer only answers API requests from its own pages"})
         if path == "/api/version":
@@ -192,6 +197,12 @@ class Handler(BaseHTTPRequestHandler):
             except PackageNotFoundError:
                 ver = None
             return self.send_json(200, {"version": ver, "commit": git_commit()})
+        if path in LOCAL_ROUTES:
+            if LOCAL_REPO is None:
+                return self.send_json(404, {"error": "Diffsplainer was not started with --local"})
+            if path == "/api/review":
+                return self.send_json(405, {"error": "Use POST"})
+            return self.api_local() if path == "/api/local" else self.stream(self._explain_local)
         if m := PR_RE.match(path):
             return self.api_pr(m[1], m[2], int(m[3]))
         if m := EXPLAIN_RE.match(path):
@@ -210,6 +221,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -226,7 +239,45 @@ class Handler(BaseHTTPRequestHandler):
             ctype += "; charset=utf-8"
         self.send_body(200, target.read_bytes(), ctype)
 
+    def do_POST(self):
+        self.close_connection = True  # a refused request leaves its body unread
+        if not self.host_allowed():
+            return
+        if unquote(urlparse(self.path).path) != "/api/review" or LOCAL_REPO is None:
+            return self.send_json(404, {"error": "Not found"})
+        # This writes into the repository's git directory, so a request must come from the app's own page. Unlike the
+        # GET check, a missing Sec-Fetch-Site is refused, and a JSON body keeps simple cross-site form posts out.
+        if self.headers.get("Sec-Fetch-Site") != "same-origin":
+            return self.send_json(403, {"error": "Diffsplainer only accepts reviews from its own page"})
+        if self.headers.get_content_type() != "application/json":
+            return self.send_json(415, {"error": "Send the review as application/json"})
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            return self.send_json(411, {"error": "Content-Length is required"})
+        if not 0 <= length <= MAX_REVIEW_BYTES:
+            return self.send_json(413, {"error": f"A review request is at most {MAX_REVIEW_BYTES} bytes"})
+        try:
+            req = json.loads(self.rfile.read(length))
+        except ValueError:
+            return self.send_json(400, {"error": "The body is not JSON"})
+        try:
+            shas = {c["sha"] for c in local.list_commits(LOCAL_REPO, *local.current_range(LOCAL_REPO))}
+            data = review.apply(LOCAL_REPO, req, shas)
+        except review.ReviewError as e:
+            return self.send_json(409, {"error": str(e)})
+        except ValueError as e:
+            return self.send_json(400, {"error": str(e)})
+        self.send_json(200, {"review": data})
+
     # --- API -----------------------------------------------------------
+
+    def api_local(self):
+        try:
+            data = local.load(LOCAL_REPO)
+        except Exception as e:  # noqa: BLE001 - report any failure to the client
+            return self.send_json(500, {"error": str(e)})
+        self.send_json(200, data)
 
     def api_pr(self, owner: str, repo: str, num: int):
         try:
@@ -286,6 +337,10 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def api_explain(self, owner: str, repo: str, num: int, pr_limit: int):
+        self.stream(lambda send, gone: self._explain(owner, repo, num, pr_limit, send, gone))
+
+    def stream(self, explain):
+        """Answer with Server-Sent Events: `explain(send, gone)` sends them, and `gone` is set when the client leaves."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -311,7 +366,7 @@ class Handler(BaseHTTPRequestHandler):
         stop = threading.Event()
         threading.Thread(target=watch_disconnect, args=(self.connection, gone, stop), daemon=True).start()
         try:
-            self._explain(owner, repo, num, pr_limit, send, gone)
+            explain(send, gone)
         except ClientGone:
             pass
         except Exception as e:  # noqa: BLE001 - report any failure to the client
@@ -335,95 +390,129 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
         key = f"{owner}/{repo}/{num}@{data['pr']['baseSha']}..{data['pr']['headSha']}:{pr_limit}"
-        with _cache_lock:
-            cached = _explain_cache.get(key)
-            if cached:
-                _explain_cache.move_to_end(key)
-        if cached:
-            for event, payload in cached:
-                send(event, payload)
+
+        def context():
+            paths = [f["filename"] for f in data["files"]]
+            send("status", {"message": "Loading project instructions and related PRs…"})
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                instr_f = pool.submit(project_instructions, owner, repo, data["pr"]["baseSha"], paths)
+                rel_f = pool.submit(related_pulls, owner, repo, data["_raw"], paths, pr_limit)
+                instructions, related = instr_f.result(), rel_f.result()
+            return {"pr": data["pr"], "instructions": instructions, "related": related, "files": data["files"]}
+
+        explain_changes(key, context, send, gone)
+
+    def _explain_local(self, send, gone):
+        data = local.load(LOCAL_REPO)
+        info, files = data["local"], data["files"]
+        changed = sum(f["additions"] + f["deletions"] for f in files)
+        if changed > MAX_CHANGED_LINES:
+            return send(
+                "error",
+                {
+                    "scope": "limit",
+                    "message": f"These commits change {changed} lines. Diffsplainer explains up to "
+                    f"{MAX_CHANGED_LINES} changed lines, so the diff is shown without explanations.",
+                },
+            )
+        if not files:
             return send("done", {})
+        key = f"local:{LOCAL_REPO}@{info['base']}..{info['head']}"
 
-        log: list = []
+        def context():
+            instructions = local_instructions(LOCAL_REPO, [f["filename"] for f in files])
+            return {"local": info, "instructions": instructions, "related": [], "files": files}
 
-        def emit(event, payload):
-            log.append((event, payload))
+        explain_changes(key, context, send, gone)
+
+
+def explain_changes(key, build_context, send, gone):
+    """Send the cached explanations under `key`, or ask Claude for them. `build_context()` returns the prompt context
+    (`instructions`, `related`, `files` and `pr` or `local`)."""
+    with _cache_lock:
+        cached = _explain_cache.get(key)
+        if cached:
+            _explain_cache.move_to_end(key)
+    if cached:
+        for event, payload in cached:
             send(event, payload)
+        return send("done", {})
 
-        paths = [f["filename"] for f in data["files"]]
-        send("status", {"message": "Loading project instructions and related PRs…"})
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            instr_f = pool.submit(project_instructions, owner, repo, data["pr"]["baseSha"], paths)
-            rel_f = pool.submit(related_pulls, owner, repo, data["_raw"], paths, pr_limit)
-            instructions, related = instr_f.result(), rel_f.result()
-        emit(
-            "context",
-            {
-                "instructions": [d["path"] for d in instructions],
-                "related": [{k: v for k, v in r.items() if k != "body"} for r in related],
-            },
-        )
+    log: list = []
 
-        ctx = {"pr": data["pr"], "instructions": instructions, "related": related, "files": data["files"]}
-        work = [b for f in data["files"] if f["chunks"] for b in batches(f)]
-        total = len(work) + 1
-        send(
-            "status",
-            {"message": f"Asking Claude Code to explain {len(work)} file batch(es)…", "done": 0, "total": total},
-        )
+    def emit(event, payload):
+        log.append((event, payload))
+        send(event, payload)
 
-        def overview_task():
-            if gone.is_set():
-                return
+    ctx = build_context()
+    files = ctx["files"]
+    emit(
+        "context",
+        {
+            "instructions": [d["path"] for d in ctx["instructions"]],
+            "related": [{k: v for k, v in r.items() if k != "body"} for r in ctx["related"]],
+        },
+    )
+
+    work = [b for f in files if f["chunks"] for b in batches(f)]
+    total = len(work) + 1
+    send(
+        "status",
+        {"message": f"Asking Claude Code to explain {len(work)} file batch(es)…", "done": 0, "total": total},
+    )
+
+    def overview_task():
+        if gone.is_set():
+            return
+        try:
+            emit("overview", explain_overview(ctx, files, gone))
+            return True
+        except ClientGone:
+            raise
+        except ClaudeCancelled:
+            return
+        except Exception as e:  # noqa: BLE001 - report any failure to the client
+            send("error", {"scope": "overview", "message": str(e)})
+            return False
+
+    def file_task(file):
+        if gone.is_set():
+            return
+        try:
+            out = explain_file(ctx, file, gone)
+        except ClaudeCancelled:
+            return
+        except Exception as e:  # noqa: BLE001 - report any failure to the client
+            send("error", {"scope": "file", "ids": [c["id"] for c in file["chunks"]], "message": str(e)})
+            return False
+        valid = {c["id"] for c in file["chunks"]}
+        seen = set()
+        for c in out.get("chunks", []):
+            if c.get("id") in valid:
+                emit("chunk", c)
+                seen.add(c["id"])
+        # Rows left out show "No explanation returned" on the page; the incomplete log must not be cached.
+        return seen == valid
+
+    ok = True
+    with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+        futures = [pool.submit(overview_task)] + [pool.submit(file_task, f) for f in work]
+        for done, fut in enumerate(as_completed(futures), 1):
             try:
-                emit("overview", explain_overview(ctx, data["files"], gone))
-                return True
+                ok = fut.result() is True and ok
+                send("status", {"done": done, "total": total})
             except ClientGone:
+                gone.set()
+                for f in futures:
+                    f.cancel()
                 raise
-            except ClaudeCancelled:
-                return
-            except Exception as e:  # noqa: BLE001 - report any failure to the client
-                send("error", {"scope": "overview", "message": str(e)})
-                return False
 
-        def file_task(file):
-            if gone.is_set():
-                return
-            try:
-                out = explain_file(ctx, file, gone)
-            except ClaudeCancelled:
-                return
-            except Exception as e:  # noqa: BLE001 - report any failure to the client
-                send("error", {"scope": "file", "ids": [c["id"] for c in file["chunks"]], "message": str(e)})
-                return False
-            valid = {c["id"] for c in file["chunks"]}
-            seen = set()
-            for c in out.get("chunks", []):
-                if c.get("id") in valid:
-                    emit("chunk", c)
-                    seen.add(c["id"])
-            # Rows left out show "No explanation returned" on the page; the incomplete log must not be cached.
-            return seen == valid
-
-        ok = True
-        with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
-            futures = [pool.submit(overview_task)] + [pool.submit(file_task, f) for f in work]
-            for done, fut in enumerate(as_completed(futures), 1):
-                try:
-                    ok = fut.result() is True and ok
-                    send("status", {"done": done, "total": total})
-                except ClientGone:
-                    gone.set()
-                    for f in futures:
-                        f.cancel()
-                    raise
-
-        if ok:
-            with _cache_lock:
-                _explain_cache[key] = log
-                while len(_explain_cache) > EXPLAIN_CACHE_SIZE:
-                    _explain_cache.popitem(last=False)
-        send("done", {})
+    if ok:
+        with _cache_lock:
+            _explain_cache[key] = log
+            while len(_explain_cache) > EXPLAIN_CACHE_SIZE:
+                _explain_cache.popitem(last=False)
+    send("done", {})
 
 
 def pr_path(arg: str) -> str | None:
@@ -432,17 +521,29 @@ def pr_path(arg: str) -> str | None:
 
 
 def main():
+    global LOCAL_REPO
     path = None
-    if len(sys.argv) > 1:
+    if sys.argv[1:2] == ["--local"]:
+        LOCAL_REPO = Path(sys.argv[2] if len(sys.argv) > 2 else ".").resolve()
+        try:
+            local.current_range(LOCAL_REPO)  # fail now, not on the first page load
+        except (ValueError, review.ReviewError) as e:
+            sys.exit(str(e))
+        path = "/"
+    elif len(sys.argv) > 1:
         path = pr_path(sys.argv[1])
         if not path:
             sys.exit(
-                f"Not a pull request URL: {sys.argv[1]}\nUsage: diffsplainer [https://github.com/owner/repo/pull/123]"
+                f"Not a pull request URL: {sys.argv[1]}\n"
+                "Usage: diffsplainer [https://github.com/owner/repo/pull/123 | --local [path]]"
             )
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     server.daemon_threads = True
-    print(f"PR review app on http://localhost:{PORT}")
-    print(f"Open e.g. http://localhost:{PORT}/owner/repo/pull/123")
+    if LOCAL_REPO:
+        print(f"Reviewing the unpushed commits of {LOCAL_REPO} on http://localhost:{PORT}")
+    else:
+        print(f"PR review app on http://localhost:{PORT}")
+        print(f"Open e.g. http://localhost:{PORT}/owner/repo/pull/123")
     if path:
         webbrowser.open(f"http://localhost:{PORT}{path}")
     try:

@@ -30,6 +30,17 @@ To open any GitHub PR with one click, drag the Diffsplain link from the start pa
 
 The address bar always shows the PR you're reviewing, so links can be shared. To change how many related PRs Claude reads, add `?prs=N` (0–10, default 3) to the address.
 
+## Review unpushed commits
+
+To review commits that an agent made and has not pushed, run the app inside the repository, or give it the path:
+
+```sh
+uvx diffsplainer --local
+uvx diffsplainer --local path/to/repo
+```
+
+The page lists the commits after the branch's upstream (with no upstream, after the point where the branch left the default branch) and shows them as one diff, with an explanation next to each chunk. Nothing goes to GitHub, and the app never changes the repository's files, index or branches.
+
 ## How it works
 
 The app fetches the PR from GitHub and splits each file's diff into chunks. Claude Code explains each chunk, and the explanation appears next to the chunk as soon as it is ready.
