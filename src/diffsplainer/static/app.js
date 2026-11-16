@@ -4,6 +4,15 @@ const app = $('#app');
 const urlInput = $('#url');
 let source = null;
 let loadSeq = 0;
+const wrapBox = $('#wrap');
+let wrapOn = true;
+try { wrapOn = localStorage.getItem('wrap') !== '0'; } catch {}
+wrapBox.checked = wrapOn;
+document.body.classList.toggle('wrap', wrapOn);
+wrapBox.addEventListener('change', () => {
+  document.body.classList.toggle('wrap', wrapBox.checked);
+  try { localStorage.setItem('wrap', wrapBox.checked ? '1' : '0'); } catch {}
+});
 
 $('.host').textContent = location.host;
 // Opens the current GitHub PR (github.com or Enterprise) in this app; built from location.origin so it follows any host/port.
@@ -215,6 +224,7 @@ function explain(owner, repo, num) {
     else {
       source.close(); // stop EventSource auto-reconnecting into the same failure
       status(d.scope === 'limit' ? d.message : `Error: ${d.message}`);
+      $('#status').classList.toggle('warn', d.scope === 'limit');
       $('.progress').hidden = true;
       document.querySelectorAll('.skeleton').forEach((el) => el.remove());
     }

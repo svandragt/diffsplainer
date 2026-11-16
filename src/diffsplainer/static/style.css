@@ -43,6 +43,7 @@ main { max-width: 1600px; margin: 0 auto; padding: 16px; }
 .pill.merged { background: #8250df; } .pill.closed { background: #cf222e; } .pill.draft { background: #6e7781; }
 .plus { color: var(--plus); } .minus { color: var(--minus); }
 .status { color: var(--muted); font-size: 13px; margin-top: 8px; }
+.status.warn { color: var(--text); background: var(--warn-bg); border-left: 3px solid var(--warn-border); padding: 6px 8px; border-radius: 4px; }
 .progress { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 6px; }
 .progress div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
 
@@ -83,6 +84,8 @@ main { max-width: 1600px; margin: 0 auto; padding: 16px; }
 .diff { overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 20px; }
 .diff table { border-collapse: collapse; width: 100%; }
 .diff td { padding: 0 8px; white-space: pre; vertical-align: top; }
+body.wrap .diff td.s { white-space: pre-wrap; overflow-wrap: anywhere; }
+.wrap-toggle { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); white-space: nowrap; cursor: pointer; }
 .diff td.n { width: 1%; min-width: 44px; text-align: right; color: var(--muted); user-select: none; }
 .diff tr.scope td { background: var(--hunk); color: var(--muted); padding: 2px 8px; }
 .diff tr.add td { background: var(--add-bg); } .diff tr.add td.n { background: var(--add-num); }

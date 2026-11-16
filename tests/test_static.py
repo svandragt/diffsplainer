@@ -74,3 +74,10 @@ def test_filename_rules_map_dockerfile_makefile_mk_and_env_variants_and_nothing_
     assert actual == expected
     prism = (VENDOR / "prism.js").read_text()
     assert [i for i in ("docker", "makefile", "ini") if not re.search(rf"languages\.{i}=", prism)] == []
+
+
+def test_index_has_a_wrap_toggle_checked_by_default():
+    html = (server.STATIC / "index.html").read_text()
+    tag = re.search(r"<input\b[^>]*\bid=\"wrap\"[^>]*>", html)
+    assert tag and 'type="checkbox"' in tag.group(0) and re.search(r"\bchecked\b", tag.group(0))
+    assert "body.wrap .diff td.s" in (server.STATIC / "style.css").read_text()
