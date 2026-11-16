@@ -55,7 +55,7 @@ _REPO = r"((?!\.\.?/)[\w.-]+)/((?!\.\.?/)[\w.-]+)/(\d+)$"
 PR_RE = re.compile(r"^/api/pr/" + _REPO)
 EXPLAIN_RE = re.compile(r"^/api/explain/" + _REPO)
 TERM_RE = re.compile(r"^/api/explain-term/" + _REPO)
-LOCAL_ROUTES = ("/api/local", "/api/local/explain", "/api/review")
+LOCAL_ROUTES = ("/api/local", "/api/local/explain", "/api/local/explain-term", "/api/review")
 # Any host, so GitHub Enterprise PR URLs work like they do in the bookmarklet
 CLI_PR_RE = re.compile(r"(?:^|/)((?!\.\.?/)[\w.-]+)/((?!\.\.?/)[\w.-]+)/pull/(\d+)(?:[/?#]|$)")
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
@@ -202,6 +202,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(404, {"error": "Diffsplainer was not started with --local"})
             if path == "/api/review":
                 return self.send_json(405, {"error": "Use POST"})
+            if path == "/api/local/explain-term":
+                return self.api_local_explain_term(parse_qs(url.query))
             return self.api_local() if path == "/api/local" else self.stream(self._explain_local)
         if m := PR_RE.match(path):
             return self.api_pr(m[1], m[2], int(m[3]))
@@ -289,6 +291,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, {k: v for k, v in data.items() if k != "_raw"})
 
     def api_explain_term(self, owner: str, repo: str, num: int, query: dict):
+        def head(data):
+            return owner, repo, num, data["pr"]["baseSha"], data["pr"]["headSha"]
+
+        self.answer_term(query, lambda: load_pr(owner, repo, num), "pr", head)
+
+    def api_local_explain_term(self, query: dict):
+        def head(data):
+            return f"local:{LOCAL_REPO}", data["local"]["base"], data["local"]["head"]
+
+        self.answer_term(query, lambda: local.load(LOCAL_REPO), "local", head)
+
+    def answer_term(self, query: dict, load, kind: str, head):
+        """Explain one selected term. `load()` returns the PR or the local commits (`kind` is `pr` or `local`), and
+        `head(data)` is the start of the cache key, which changes when the commits do."""
         text = query.get("text", [""])[0].strip()
         around = query.get("around", [""])[0]
         chunk_id = query.get("chunk", [None])[0]
@@ -297,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
         if len(around) > MAX_AROUND_CHARS:
             return self.send_json(400, {"error": f"around must be at most {MAX_AROUND_CHARS} characters"})
         try:
-            data = load_pr(owner, repo, num)
+            data = load()
         except gh.GitHubError as e:
             return self.send_json(e.status, {"error": str(e)})
         except Exception as e:  # noqa: BLE001 - report any failure to the client
@@ -307,7 +323,7 @@ class Handler(BaseHTTPRequestHandler):
             chunk = next((c for f in data["files"] for c in f["chunks"] if c["id"] == chunk_id), None)
             if chunk is None:
                 return self.send_json(404, {"error": f"Unknown chunk {chunk_id}"})
-        key = (owner, repo, num, data["pr"]["baseSha"], data["pr"]["headSha"], chunk_id or "", text, around)
+        key = (*head(data), chunk_id or "", text, around)
         with _cache_lock:
             answer = _term_cache.get(key)
             if answer:
@@ -318,7 +334,7 @@ class Handler(BaseHTTPRequestHandler):
         gone, stop = threading.Event(), threading.Event()
         threading.Thread(target=watch_disconnect, args=(self.connection, gone, stop), daemon=True).start()
         try:
-            answer = explain_term({"pr": data["pr"], "files": data["files"]}, chunk, text, around, gone)
+            answer = explain_term({kind: data[kind], "files": data["files"]}, chunk, text, around, gone)
         except ClaudeCancelled:
             return
         except ClaudeError as e:

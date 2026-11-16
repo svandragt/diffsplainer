@@ -1,6 +1,7 @@
 import http.client
 import json
 import sys
+import urllib.parse
 from types import SimpleNamespace
 
 import pytest
@@ -60,7 +61,15 @@ def test_api_local_reports_a_range_that_cannot_be_found(serve, local_repo):
     assert status == 500 and "default branch" in data["error"]
 
 
-@pytest.mark.parametrize("method, path", [("GET", "/api/local"), ("GET", "/api/local/explain"), ("GET", "/api/review")])
+@pytest.mark.parametrize(
+    "method, path",
+    [
+        ("GET", "/api/local"),
+        ("GET", "/api/local/explain"),
+        ("GET", "/api/local/explain-term?text=x"),
+        ("GET", "/api/review"),
+    ],
+)
 def test_local_routes_are_404_in_pr_mode(serve, monkeypatch, method, path):
     monkeypatch.setattr(server, "LOCAL_REPO", None)
     assert send(serve, method, path)[0] == 404
@@ -271,6 +280,60 @@ def test_a_range_over_the_line_cap_skips_claude_and_says_why(serve, local_repo, 
     ((event, payload),) = explain_events(serve)
     assert (event, payload["scope"]) == ("error", "limit") and "commits change" in payload["message"]
     assert fake_claude.files == []
+
+
+@pytest.fixture
+def term(serve, local_repo, monkeypatch):
+    server._term_cache.clear()
+    calls = []
+
+    def explain_term(ctx, chunk, text, around, cancel=None):
+        calls.append(SimpleNamespace(ctx=ctx, chunk=chunk, text=text, around=around))
+        return {"meaning": "m", "here": "h"}
+
+    monkeypatch.setattr(server, "explain_term", explain_term)
+
+    def get(**params):
+        return send(serve, "GET", "/api/local/explain-term?" + urllib.parse.urlencode(params))
+
+    return SimpleNamespace(calls=calls, get=get)
+
+
+def test_a_term_in_local_commits_is_explained_with_the_local_context_and_chunk(term, local_repo, serve):
+    chunk = send(serve, "GET", "/api/local")[1]["files"][0]["chunks"][0]
+    assert term.get(text="added1", around="Adds a line.", chunk=chunk["id"]) == (200, {"meaning": "m", "here": "h"})
+    call = term.calls[0]
+    assert (call.chunk["id"], call.text, call.around) == (chunk["id"], "added1", "Adds a line.")
+    assert call.ctx["local"]["branch"] == "main" and "pr" not in call.ctx
+    assert [c["sha"] for c in call.ctx["local"]["commits"]] == [local_repo.a, local_repo.b]
+
+
+def test_a_local_term_answer_is_cached_until_the_head_changes(term, local_repo):
+    assert term.get(text="t") == term.get(text="t")
+    assert len(term.calls) == 1
+    (local_repo.path / "new.txt").write_text("n\n")
+    local_repo.commit("More")
+    term.get(text="t")
+    assert len(term.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "params, status",
+    [
+        ({}, 400),
+        ({"text": "x" * 301}, 400),
+        ({"text": "t", "around": "x" * 4001}, 400),
+        ({"text": "t", "chunk": "nope"}, 404),
+    ],
+)
+def test_a_bad_local_term_request_is_refused_without_a_claude_call(term, params, status):
+    assert term.get(**params)[0] == status
+    assert not term.calls
+
+
+def test_a_local_term_request_with_a_foreign_host_is_refused(serve, term):
+    assert send(serve, "GET", "/api/local/explain-term?text=t", headers={"Host": "attacker.example"})[0] == 403
+    assert not term.calls
 
 
 @pytest.fixture
