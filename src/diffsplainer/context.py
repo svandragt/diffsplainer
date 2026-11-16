@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from itertools import zip_longest
+from pathlib import Path
 
 from . import github as gh
 
@@ -27,18 +28,12 @@ def _safe(fn, *args):
         return None
 
 
-def project_instructions(owner: str, repo: str, ref: str, changed: list[str]) -> list[dict]:
-    wanted = list(ROOT_DOCS)
-    # Nested CLAUDE.md / AGENTS.md in directories that contain changed files.
-    tree = _safe(gh.get_tree, owner, repo, ref)
-    if tree and tree.get("tree"):
-        dirs = {"/".join(p.split("/")[:i]) for p in changed for i in range(1, p.count("/") + 1)}
-        for node in tree["tree"]:
-            d, _, base = node["path"].rpartition("/")
-            if node["type"] == "blob" and base in NESTED_DOCS and d in dirs:
-                wanted.append(node["path"])
-    wanted.append("README.md")  # last, so the fallback check below sees the nested files too
+def _changed_dirs(changed: list[str]) -> set[str]:
+    return {"/".join(p.split("/")[:i]) for p in changed for i in range(1, p.count("/") + 1)}
 
+
+def _read_docs(wanted: list[str], read) -> list[dict]:
+    """Read each of `wanted` with `read(path)` (None when missing), within the size caps. `wanted` ends with README.md."""
     docs: list[dict] = []
     total = 0
     for path in wanted:
@@ -47,13 +42,43 @@ def project_instructions(owner: str, repo: str, ref: str, changed: list[str]) ->
         # README is only a fallback when there are no real instruction files.
         if path == "README.md" and docs:
             continue
-        text = _safe(gh.get_file, owner, repo, path, ref)
+        text = read(path)
         if not text:
             continue
         body = clip(text, min(MAX_DOC_CHARS, MAX_TOTAL_DOC_CHARS - total))
         total += len(body)
         docs.append({"path": path, "body": body})
     return docs
+
+
+def project_instructions(owner: str, repo: str, ref: str, changed: list[str]) -> list[dict]:
+    wanted = list(ROOT_DOCS)
+    # Nested CLAUDE.md / AGENTS.md in directories that contain changed files.
+    tree = _safe(gh.get_tree, owner, repo, ref)
+    if tree and tree.get("tree"):
+        dirs = _changed_dirs(changed)
+        for node in tree["tree"]:
+            d, _, base = node["path"].rpartition("/")
+            if node["type"] == "blob" and base in NESTED_DOCS and d in dirs:
+                wanted.append(node["path"])
+    wanted.append("README.md")  # last, so the fallback check sees the nested files too
+    return _read_docs(wanted, lambda path: _safe(gh.get_file, owner, repo, path, ref))
+
+
+def local_instructions(repo: Path, changed: list[str]) -> list[dict]:
+    """`project_instructions` for a local repository: the files are read from its work tree."""
+
+    def read(path: str) -> str | None:
+        file = (repo / path).resolve()
+        if not file.is_relative_to(repo.resolve()) or not file.is_file():  # a symlink may point at any file
+            return None
+        try:
+            return file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    nested = [f"{d}/{name}" for d in sorted(_changed_dirs(changed)) for name in sorted(NESTED_DOCS)]
+    return _read_docs([*ROOT_DOCS, *nested, "README.md"], read)
 
 
 def _round_robin_shas(commit_lists: list[list[dict]], limit: int) -> list[str]:

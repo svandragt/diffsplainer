@@ -83,6 +83,12 @@ def to_text(lines: list[dict]) -> str:
     return "\n".join(mark[l["t"]] + l["s"] for l in lines)
 
 
+def tree_order(path: str) -> list[tuple[int, str]]:
+    """Sort key for GitHub's file-tree order: directories before files, case-insensitive."""
+    *dirs, name = path.split("/")
+    return [(0, d.casefold()) for d in dirs] + [(1, name.casefold())]
+
+
 def chunk_files(files: list[dict]) -> list[dict]:
     out = []
     for fi, f in enumerate(files):

@@ -56,3 +56,51 @@ def test_related_pulls_caps_commits_round_robin_across_files(monkeypatch):
     monkeypatch.setattr(gh, "pulls_for_commit", pulls_for_commit)
     context.related_pulls("o", "r", {"number": 1, "base": {"sha": "base"}}, list(commits), limit=3)
     assert sorted(looked_up) == ["a1", "a2", "c1"]
+
+
+def _disk(tmp_path, files: dict[str, str]):
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+
+
+def test_local_instructions_read_root_and_nested_files_from_disk_without_the_readme(tmp_path):
+    _disk(tmp_path, {"CLAUDE.md": "root", "pkg/AGENTS.md": "nested", "other/AGENTS.md": "unrelated", "README.md": "r"})
+    docs = context.local_instructions(tmp_path, ["pkg/mod.py", "top.py"])
+    assert docs == [{"path": "CLAUDE.md", "body": "root"}, {"path": "pkg/AGENTS.md", "body": "nested"}]
+
+
+def test_local_instructions_fall_back_to_the_readme(tmp_path):
+    _disk(tmp_path, {"README.md": "readme"})
+    assert _paths(context.local_instructions(tmp_path, ["a.py"])) == ["README.md"]
+
+
+def test_local_instructions_are_empty_without_any_file(tmp_path):
+    assert context.local_instructions(tmp_path, ["a.py"]) == []
+
+
+def test_local_instructions_clip_long_files(tmp_path):
+    _disk(tmp_path, {"AGENTS.md": "x" * (context.MAX_DOC_CHARS + 10)})
+    (doc,) = context.local_instructions(tmp_path, ["a.py"])
+    assert doc["body"].endswith("…[truncated]") and len(doc["body"]) < context.MAX_DOC_CHARS + 20
+
+
+def test_local_instructions_follow_a_symlink_inside_the_repo_but_not_one_that_leaves_it(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("SECRET")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "AGENTS.md").write_text("rules")
+    (repo / "CLAUDE.md").symlink_to("AGENTS.md")
+    (repo / "CONTRIBUTING.md").symlink_to(outside / "secret.txt")
+    (repo / "pkg").symlink_to(outside)
+    (outside / "AGENTS.md").write_text("SECRET")
+    docs = context.local_instructions(repo, ["pkg/mod.py"])
+    assert [(d["path"], d["body"]) for d in docs] == [("CLAUDE.md", "rules"), ("AGENTS.md", "rules")]
+
+
+def test_local_instructions_skip_a_file_that_is_not_text_and_a_directory(tmp_path):
+    (tmp_path / "AGENTS.md").write_bytes(b"\xff\xfe\x00")
+    (tmp_path / "CONTRIBUTING.md").mkdir()
+    assert context.local_instructions(tmp_path, ["a.py"]) == []

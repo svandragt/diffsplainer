@@ -238,3 +238,43 @@ def test_overview_schema_asks_for_outcome_design_choice_and_specific_risks():
 def test_system_asks_for_plain_language():
     line = 'Write in plain language: short sentences, common words, active voice. Name the thing that acts. No filler, hedging or marketing words such as "robust", "seamless" or "leverage".'
     assert line in claude.SYSTEM
+
+
+LOCAL_CTX = {
+    "local": {
+        "branch": "feature-x",
+        "base": "b" * 40,
+        "head": "c" * 40,
+        "commits": [
+            {"sha": "1234567" + "0" * 33, "subject": "Add cache", "body": "Keeps feeds for a minute."},
+            {"sha": "abcdef0" + "0" * 33, "subject": "Fix typo", "body": ""},
+        ],
+    },
+    "instructions": [{"path": "AGENTS.md", "body": "Project rules."}],
+    "related": [],
+    "files": [{"filename": "a.py", "status": "modified", "additions": 3, "deletions": 1}],
+}
+
+
+def test_context_block_for_local_commits_lists_the_branch_commits_instructions_and_files():
+    block = claude.context_block(LOCAL_CTX)
+    assert block.startswith("<pr_context>") and block.endswith("</pr_context>")
+    assert "feature-x" in block
+    assert "1234567 Add cache\nKeeps feeds for a minute." in block
+    assert "abcdef0 Fix typo" in block
+    assert '<file path="AGENTS.md">\nProject rules.\n</file>' in block
+    assert "- a.py (modified, +3/-1)" in block
+    assert "Pull request #" not in block and "Author:" not in block and "Previous merged PRs" not in block
+
+
+def test_a_chunk_tag_names_the_commit_of_a_local_chunk_only():
+    chunk = {"id": "f0c0", "scope": "", "lines": [LINE]}
+    assert claude.chunk_tag(chunk).startswith('<chunk id="f0c0">')
+    assert claude.chunk_tag({**chunk, "sha": "1234567" + "0" * 33}).startswith('<chunk id="f0c0" commit="1234567">')
+    assert claude.chunk_tag({**chunk, "sha": None}).startswith('<chunk id="f0c0">')
+
+
+def test_explain_file_for_local_commits_sends_the_local_context(monkeypatch):
+    seen = _capture_prompt(monkeypatch)
+    claude.explain_file(LOCAL_CTX, FILE)
+    assert "1234567 Add cache" in seen["prompt"] and "Pull request #" not in seen["prompt"]

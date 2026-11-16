@@ -1,0 +1,134 @@
+"""Local commit review: a repository's unpushed commits as one diff of explained chunks.
+
+Nothing here writes to the repository: it only runs read-only git commands.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+from pathlib import Path
+
+from . import review
+from .diff import chunk_files, tree_order
+
+DEFAULT_REFS = ("refs/remotes/origin/HEAD", "refs/heads/main", "refs/heads/master")
+BLAME_RE = re.compile(
+    r"^([0-9a-f]{40}) \d+ (\d+)", re.MULTILINE
+)  # `--porcelain` entry line: sha, original line, final line
+STATUS = {"A": "added", "D": "removed", "R": "renamed"}
+
+
+def run(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=repo, capture_output=True, encoding="utf-8", errors="replace", check=False
+        )
+    except OSError as e:
+        raise ValueError(f"Cannot run git in {repo}: {e}") from None
+
+
+def git(repo: Path, *args: str) -> str:
+    r = run(repo, *args)
+    if r.returncode:
+        raise ValueError(f"git {args[0]} failed in {repo}: {r.stderr.strip()}")
+    return r.stdout
+
+
+def is_ancestor(repo: Path, a: str, b: str) -> bool:
+    return run(repo, "merge-base", "--is-ancestor", a, b).returncode == 0
+
+
+def current_range(repo: Path) -> tuple[str, str]:
+    """The base and HEAD shas of the commits under review."""
+    head = git(repo, "rev-parse", "HEAD").strip()
+    for ref in ("@{upstream}", *DEFAULT_REFS):
+        r = run(repo, "merge-base", "HEAD", ref)
+        if r.returncode == 0:
+            base = r.stdout.strip()
+            break
+    else:
+        raise ValueError("The branch has no upstream, and the repository has no default branch to compare it with")
+    # The newest review round's head, if it is a commit of this range, is where the next round starts. The value is
+    # from a file another program writes, so it must be a sha before it goes to git.
+    reviewed = review.last_head(review.read(repo))
+    if reviewed and is_ancestor(repo, base, reviewed) and is_ancestor(repo, reviewed, head):
+        base = reviewed
+    return base, head
+
+
+def list_commits(repo: Path, base: str, head: str) -> list[dict]:
+    # --no-show-signature: with `log.showSignature` set, git log prints the signature check into the format
+    out = git(repo, "log", "--reverse", "--no-show-signature", "--format=%H%x00%s%x00%b%x00", f"{base}..{head}")
+    f = out.split("\0")
+    return [{"sha": f[i].strip(), "subject": f[i + 1], "body": f[i + 2].strip()} for i in range(0, len(f) - 1, 3)]
+
+
+def diff_files(repo: Path, base: str, head: str) -> list[dict]:
+    """The combined diff as GitHub-style file dicts (`patch`, `status`, ...), in the order of the Files changed tab."""
+    args = ["diff", "-M", "--no-color", "--no-ext-diff", "-U3"]
+    tokens = git(repo, *args, "--name-status", "-z", base, head).split("\0")[:-1]
+    patches = ("\n" + git(repo, *args, base, head)).split("\ndiff --git ")[1:]  # one per file, same order as the names
+    files, i = [], 0
+    for patch in patches:
+        status = tokens[i]
+        names = tokens[i + 1 : i + 3] if status[0] == "R" else tokens[i + 1 : i + 2]
+        i += 1 + len(names)
+        start = patch.find("\n@@ ")  # a binary file, a pure rename or a mode change has no hunks
+        body = patch[start + 1 :] if start >= 0 else ""
+        lines = body.split("\n")
+        files.append(
+            {
+                "filename": names[-1],
+                "previous_filename": names[0] if status[0] == "R" else None,
+                "status": STATUS.get(status[0], "modified"),
+                "patch": body,
+                "additions": sum(l.startswith("+") for l in lines),
+                "deletions": sum(l.startswith("-") for l in lines),
+            }
+        )
+    return sorted(files, key=lambda f: tree_order(f["filename"]))
+
+
+def blame(repo: Path, rev_range: str, path: str, *flags: str) -> dict[int, str]:
+    """Line number -> sha for one file, or {} when git cannot blame it (a submodule, for one)."""
+    r = run(repo, "blame", "--porcelain", *flags, rev_range, "--", path)
+    return {int(n): sha for sha, n in BLAME_RE.findall(r.stdout)} if r.returncode == 0 else {}
+
+
+def tag_chunks(repo: Path, base: str, head: str, commits: list[dict], files: list[dict]) -> None:
+    """Give each chunk the `sha` of the commit it belongs to, or None when git cannot tell.
+
+    A chunk with added lines belongs to the newest commit that wrote one of them (`git blame`). A deletion-only chunk
+    belongs to the newest commit that deleted one of its lines."""
+    shas = [c["sha"] for c in commits]
+    pos = {sha: i for i, sha in enumerate(shas)}
+    pos[base] = -1
+    rev_range = f"{base}..{head}"
+    for f in files:
+        written = deleted = None
+        for c in f["chunks"]:
+            adds = [l["n"] for l in c["lines"] if l["t"] == "add"]
+            if adds:
+                written = written or blame(repo, rev_range, f["filename"])
+                i = max((pos.get(written.get(n), -1) for n in adds), default=-1)
+            else:
+                # Reverse blame names the last commit a line existed in; the commit after it deleted the line.
+                deleted = deleted or blame(repo, rev_range, f["previous"] or f["filename"], "--reverse")
+                last = (deleted.get(l["o"]) for l in c["lines"] if l["t"] == "del")
+                i = max((pos[sha] + 1 for sha in last if sha in pos), default=-1)
+            c["sha"] = shas[i] if 0 <= i < len(shas) else None
+
+
+def load(repo: Path) -> dict:
+    """The commits under review, their combined diff chunked and tagged with commits, and the review file."""
+    base, head = current_range(repo)
+    commits = list_commits(repo, base, head)
+    files = chunk_files(diff_files(repo, base, head))
+    tag_chunks(repo, base, head, commits, files)
+    branch = git(repo, "branch", "--show-current").strip() or "HEAD"
+    return {
+        "local": {"branch": branch, "base": base, "head": head, "commits": commits},
+        "files": files,
+        "review": review.read(repo),
+    }
