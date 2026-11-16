@@ -4,6 +4,7 @@ const app = $('#app');
 const urlInput = $('#url');
 let source = null;
 let loadSeq = 0;
+let session = null; // local review (`diffsplainer --local`) state; null when a PR is shown
 const wrapBox = $('#wrap');
 let wrapOn = true;
 try { wrapOn = localStorage.getItem('wrap') !== '0'; } catch {}
@@ -39,6 +40,7 @@ function parsePr(text) {
 function setApp(html) {
   lazy?.disconnect();
   app.innerHTML = html;
+  app.hidden = false;
 }
 
 function fromLocation() {
@@ -48,9 +50,11 @@ function fromLocation() {
     loadSeq++;
     if (source) source.close();
     source = null;
+    session = null;
     urlInput.value = '';
     document.title = 'Diffsplainer · PR review';
-    setApp(emptyHtml);
+    app.hidden = true; // until loadLocal knows whether this is the start page or a local review
+    loadLocal(loadSeq);
     return;
   }
   const canonical = `/${pr.owner}/${pr.repo}/pull/${pr.num}${location.search}`;
@@ -72,6 +76,7 @@ async function load({ owner, repo, num }) {
   const seq = ++loadSeq;
   if (source) source.close();
   source = null;
+  session = null;
   setApp('<div class="card">Loading pull request…</div>');
   const res = await fetch(`/api/pr/${owner}/${repo}/${num}`);
   const data = await res.json();
@@ -82,8 +87,14 @@ async function load({ owner, repo, num }) {
   }
   document.title = `#${data.pr.number} ${data.pr.title} · Diffsplainer`;
   render(data);
-  explain(owner, repo, num);
+  const prs = new URLSearchParams(location.search).get('prs');
+  explain(`/api/explain/${owner}/${repo}/${num}${prs === null ? '' : `?prs=${encodeURIComponent(prs)}`}`);
 }
+
+const skeletonCards = `<div class="split">
+      <section class="card overview" id="overview"><h2>Overview</h2><div class="skeleton"></div><div class="skeleton short"></div></section>
+      <section class="card context" id="context"><h2>Context given to Claude</h2><div class="skeleton short"></div></section>
+    </div>`;
 
 function render({ pr, files }) {
   const state = pr.draft ? 'draft' : pr.state;
@@ -99,10 +110,7 @@ function render({ pr, files }) {
       <div class="status" id="status">Starting…</div>
       <div class="progress"><div id="bar"></div></div>
     </section>
-    <div class="split">
-      <section class="card overview" id="overview"><h2>Overview</h2><div class="skeleton"></div><div class="skeleton short"></div></section>
-      <section class="card context" id="context"><h2>Context given to Claude</h2><div class="skeleton short"></div></section>
-    </div>
+    ${skeletonCards}
     ${files.map(renderFile).join('')}`);
   if (lazy) document.querySelectorAll('.diff[data-lang]').forEach((el) => lazy.observe(el));
 }
@@ -161,23 +169,26 @@ function renderFile(f) {
   return `<section class="file">${head}${rows}</section>`;
 }
 
+const mark = (t) => (t === 'add' ? '+' : t === 'del' ? '-' : ' ');
+
 function renderChunk(c, lang) {
   const body = c.lines
     .map((l) => {
-      const m = l.t === 'add' ? '+' : l.t === 'del' ? '-' : ' ';
+      const m = mark(l.t);
       return `<tr class="${l.t}"><td class="n">${l.o ?? ''}</td><td class="n">${l.n ?? ''}</td><td class="s" data-m="${m}">${esc(l.s)}</td></tr>`;
     })
     .join('');
   const scope = c.scope ? `<tr class="scope"><td colspan="3">${esc(c.scope)}</td></tr>` : '';
+  const tools = session ? `<div class="chunk-tools"><div class="chunk-bar"><code class="sha">${c.sha ? esc(c.sha.slice(0, 7)) : 'unknown commit'}</code>
+    <button type="button" class="btn req">Request changes</button></div></div>` : '';
   return `<div class="row" id="${c.id}">
-    <aside class="explain"><div class="inner"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton short"></div></div></aside>
+    <aside class="explain">${tools}<div class="inner"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton short"></div></div></aside>
     <div class="diff"${lang ? ` data-lang="${lang}"` : ''}><table>${scope}${body}</table></div>
   </div>`;
 }
 
-function explain(owner, repo, num) {
-  const prs = new URLSearchParams(location.search).get('prs');
-  source = new EventSource(`/api/explain/${owner}/${repo}/${num}${prs === null ? '' : `?prs=${encodeURIComponent(prs)}`}`);
+function explain(url) {
+  source = new EventSource(url);
   const status = (msg) => msg && ($('#status').textContent = msg);
 
   source.addEventListener('status', (e) => {
@@ -279,7 +290,6 @@ function closePop() {
 }
 
 async function askTerm({ text, around, chunk }, a) {
-  const { owner, repo, num } = parsePr(location.pathname);
   const dlg = make(`<div class="term-float term-pop" role="dialog" aria-label="Explanation of the selected text" aria-live="polite" tabindex="-1">
     <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton short"></div></div>`);
   mount(dlg, a);
@@ -288,7 +298,8 @@ async function askTerm({ text, around, chunk }, a) {
   const q = new URLSearchParams({ text, around });
   if (chunk) q.set('chunk', chunk);
   try {
-    const res = await fetch(`/api/explain-term/${owner}/${repo}/${num}?${q}`, { signal: ctl.signal });
+    const pr = parsePr(location.pathname);
+    const res = await fetch(`${pr ? `/api/explain-term/${pr.owner}/${pr.repo}/${pr.num}` : '/api/local/explain-term'}?${q}`, { signal: ctl.signal });
     const d = await res.json();
     dlg.innerHTML = res.ok
       ? `<p><span class="lbl">Meaning</span>${md(d.meaning)}</p><p><span class="lbl">Here</span>${md(d.here)}</p>`
@@ -311,17 +322,29 @@ function onSelect(e) {
   const range = sel.getRangeAt(0);
   const node = range.commonAncestorContainer;
   const inner = node.nodeType === 1 ? node : node.parentElement;
-  const host = inner?.closest('.explain, #overview'); // a range that starts and ends in different hosts has a common ancestor outside both
-  if (!host) return;
+  // a range that starts and ends in different hosts has a common ancestor outside both; a local review also takes comments on diffs
+  const host = inner?.closest(session ? '.explain, #overview, .diff' : '.explain, #overview');
+  if (!host || inner.closest('.chunk-tools')) return;
   const rects = range.getClientRects();
   const end = rects[rects.length - 1] || range.getBoundingClientRect();
   const a = { x: end.right + scrollX, top: end.top + scrollY, bottom: end.bottom + scrollY };
-  if (text.length > 300) return mount(make('<div class="term-float term-note" role="status">Select less text</div>'), a);
-  const btn = make('<button class="term-float term-btn">Explain</button>');
-  const around = (inner.closest('p') || host).textContent.replace(/\s+/g, ' ').trim().slice(0, 4000); // the server rejects more
-  btn.addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
-  btn.addEventListener('click', () => askTerm({ text, around, chunk: host.closest('.row')?.id }, a));
-  mount(btn, a);
+  const row = session && host.closest('.row'); // a chunk of a local review takes comments
+  const explainable = text.length <= 300;
+  if (!explainable && !row) return mount(make('<div class="term-float term-note" role="status">Select less text</div>'), a);
+  const group = make('<div class="term-float term-btns"></div>');
+  group.addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
+  if (explainable) {
+    const btn = make('<button class="term-btn">Explain</button>');
+    const around = (inner.closest('p, td.s') || host).textContent.replace(/\s+/g, ' ').trim().slice(0, 4000); // the server rejects more
+    btn.addEventListener('click', () => askTerm({ text, around, chunk: host.closest('.row')?.id }, a));
+    group.append(btn);
+  }
+  if (row) {
+    const btn = make('<button class="term-btn">Comment</button>');
+    btn.addEventListener('click', () => askComment(text, row.id, a));
+    group.append(btn);
+  }
+  mount(group, a);
 }
 
 // Deferred so a click that clears the selection is seen as empty. The popup check runs first:
@@ -335,6 +358,209 @@ document.addEventListener('mousedown', (e) => {
   window.getSelection().removeAllRanges(); // else the mouseup that follows reopens the Explain button
 });
 document.addEventListener('keydown', (e) => e.key === 'Escape' && closePop());
+
+// Local review (`diffsplainer --local`): the unpushed commits, and the decisions that go into the review file the agent reads.
+// Text from that file (the agent writes `reply`) is only ever set with textContent, never through innerHTML.
+const h = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+const button = (label, cls = '') => Object.assign(h('button', `btn ${cls}`, label), { type: 'button' });
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const NO_SHA = 'Git could not tell which commit wrote this chunk, so it cannot go into the review.';
+
+// `/` is the start page in PR mode; with `--local` it is the commit review (`/api/local` answers 404 otherwise).
+async function loadLocal(seq) {
+  const res = await fetch('/api/local').catch(() => null);
+  if (!res || res.status === 404) return seq === loadSeq && setApp(emptyHtml);
+  const data = await res.json();
+  if (seq !== loadSeq) return;
+  document.title = 'Unpushed commits · Diffsplainer';
+  if (!res.ok) return setApp(`<div class="card">Could not load the commits: ${esc(data.error)}</div>`);
+  renderLocal(data);
+}
+
+function renderLocal({ local: info, files, review }) {
+  session = { info, review, chunks: new Map() };
+  files.forEach((f) => f.chunks.forEach((c) => session.chunks.set(c.id, { file: f.filename, c })));
+  const n = info.commits.length;
+  const sum = (key) => files.reduce((t, f) => t + f[key], 0);
+  setApp(`
+    <section class="card pr-head">
+      <h1>${n ? plural(n, 'unpushed commit') : 'No unpushed commits'} on <code>${esc(info.branch)}</code></h1>
+      ${n ? `<div class="meta">${plural(files.length, 'file')} <span class="plus">+${sum('additions')}</span> <span class="minus">−${sum('deletions')}</span></div>
+      <div class="status" id="status">Starting…</div>
+      <div class="progress"><div id="bar"></div></div>` : ''}
+    </section>
+    ${n ? '<section class="card commits" id="commits"></section>' : ''}
+    <section class="card review" id="review"></section>
+    ${n ? skeletonCards + files.map(renderFile).join('') : ''}`);
+  renderCommits();
+  renderReview();
+  if (!n) return;
+  if (lazy) document.querySelectorAll('.diff[data-lang]').forEach((el) => lazy.observe(el));
+  explain('/api/local/explain');
+}
+
+// Sends one review request. The answer is the new review data, which redraws the commits and the panel.
+async function postReview(body) {
+  const res = await fetch('/api/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || `Error ${res.status}`);
+  session.review = d.review;
+  renderCommits();
+  renderReview();
+  return d.review;
+}
+
+// A button's request. A refused one puts the server's message in `err`, next to the button.
+async function act(body, err) {
+  try { await postReview(body); } catch (e) { err.textContent = e.message; }
+}
+
+function renderCommits() {
+  const box = $('#commits');
+  if (!box) return;
+  const list = h('ul', 'commit-list');
+  const open = new Set([...box.querySelectorAll('details[open]')].map((d) => d.dataset.sha)); // bodies the person opened
+  for (const c of session.info.commits) {
+    const what = h('div', 'what');
+    if (c.body) {
+      const d = h('details');
+      d.dataset.sha = c.sha;
+      d.open = open.has(c.sha);
+      d.append(h('summary', null, c.subject), h('pre', 'commit-body', c.body));
+      what.append(d);
+    } else what.append(h('span', null, c.subject));
+    const side = h('div', 'side');
+    if (session.review.approved.includes(c.sha)) side.append(h('span', 'pill', 'Approved'));
+    else {
+      const btn = button('Approve', 'primary');
+      const err = h('span', 'err');
+      btn.addEventListener('click', () => act({ action: 'approve', sha: c.sha }, err));
+      side.append(btn, err);
+    }
+    const li = h('li');
+    li.append(h('code', 'sha', c.sha.slice(0, 7)), what, side);
+    list.append(li);
+  }
+  box.replaceChildren(h('h2', null, 'Commits'), list);
+}
+
+function renderReview() {
+  const { review, info } = session;
+  const entries = review.entries.filter((e) => e && typeof e === 'object'); // the file is written by another program too
+  const resolved = entries.filter((e) => e.status === 'resolved');
+  const open = entries.filter((e) => e.status !== 'resolved');
+  const box = $('#review');
+  const wasOpen = $('.resolved', box)?.open;
+  box.replaceChildren(h('h2', null, `Review comments (${open.length} open)`), ...open.map(renderEntry));
+  if (!entries.length) box.append(h('p', 'none', 'No comments yet.'));
+  if (resolved.length) {
+    const d = h('details', 'resolved');
+    d.open = !!wasOpen;
+    d.append(h('summary', null, `Resolved (${resolved.length})`), ...resolved.map(renderEntry));
+    box.append(d);
+  }
+  if (!info.commits.length) return;
+  const foot = h('div', 'finish');
+  if (review.reviews.at(-1)?.head === info.head) foot.append(h('p', null, 'Review recorded — the next run shows only new commits.'));
+  else {
+    const btn = button('Finish review', 'primary');
+    const err = h('span', 'err');
+    btn.title = 'Records this HEAD, so the next run shows only commits after it';
+    btn.addEventListener('click', () => act({ action: 'start', head: info.head }, err));
+    foot.append(btn, err);
+  }
+  box.append(foot);
+}
+
+function renderEntry(e) {
+  const done = e.status === 'resolved';
+  const div = h('div', 'entry');
+  const head = h('div', 'entry-head');
+  head.append(h('b', null, e.kind === 'question' ? 'Question' : 'Change request'), h('code', null, `${e.file ?? ''}:${e.lines ?? ''}`),
+    h('code', 'sha', String(e.sha ?? '').slice(0, 7)), h('span', `pill ${done ? 'draft' : 'merged'}`, done ? 'resolved' : 'open'));
+  div.append(head);
+  if (e.quote) div.append(h('blockquote', 'quote', e.quote));
+  div.append(h('p', 'body', e.body));
+  if (e.reply) {
+    const reply = h('div', 'reply');
+    reply.append(h('span', 'lbl', 'Agent reply'), h('p', null, e.reply));
+    div.append(reply);
+  }
+  const btn = button(done ? 'Reopen' : 'Resolve');
+  const err = h('span', 'err');
+  btn.addEventListener('click', () => act({ action: 'status', id: e.id, status: done ? 'open' : 'resolved' }, err));
+  const actions = h('div', 'entry-actions');
+  actions.append(btn, err);
+  div.append(actions);
+  return div;
+}
+
+// What a request about a chunk carries: its commit, file, a line-range hint (new side, else old side) and the diff as text.
+function chunkRef({ c, file }) {
+  const side = c.lines.some((l) => l.n != null) ? 'n' : 'o';
+  const nums = c.lines.map((l) => l[side]).filter((n) => n != null);
+  const range = nums[0] === nums.at(-1) ? `${nums[0]}` : `${nums[0]}-${nums.at(-1)}`;
+  return { sha: c.sha, file, lines: side === 'n' ? range : `old ${range}`, diff: c.lines.map((l) => mark(l.t) + l.s).join('\n') };
+}
+
+// A textarea and a submit button, off while the text is empty or `blocked` holds a reason. `send(body)` posts it;
+// `done(form, review)` shows the result, and an error from `send` appears next to the button.
+function bodyForm({ label, blocked, send, done, cancel }) {
+  const form = make(`<form class="body-form"><textarea rows="3" aria-label="${label}" placeholder="${label}"></textarea>
+    <div class="actions"><button type="submit" class="btn primary">Add to review</button><button type="button" class="btn cancel">Cancel</button><span class="err" role="alert"></span></div></form>`);
+  const [text, submit, err] = [$('textarea', form), $('[type=submit]', form), $('.err', form)];
+  const sync = () => { submit.disabled = !!blocked || !text.value.trim(); };
+  err.textContent = blocked || '';
+  text.addEventListener('input', sync);
+  $('.cancel', form).addEventListener('click', () => cancel(form));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    submit.disabled = true;
+    try { done(form, await send(text.value)); } catch (x) { err.textContent = x.message; sync(); }
+  });
+  sync();
+  return form;
+}
+
+const lastId = (review) => review.entries.at(-1).id;
+
+app.addEventListener('click', (e) => {
+  const btn = e.target.closest('.req');
+  if (!btn) return;
+  const tools = btn.closest('.chunk-tools');
+  const open = $('.body-form', tools);
+  if (open) return $('textarea', open).focus();
+  const chunk = session.chunks.get(btn.closest('.row').id);
+  const form = bodyForm({
+    label: 'What should change?',
+    blocked: chunk.c.sha ? '' : NO_SHA,
+    send: (body) => postReview({ action: 'change', ...chunkRef(chunk), body }),
+    done: (f, review) => f.replaceWith(h('p', 'sent', `Change request ${lastId(review)} added to the review.`)),
+    cancel: (f) => f.remove(),
+  });
+  tools.append(form);
+  $('textarea', form).focus();
+});
+
+// Comment on the selected text of a chunk's diff or explanation; it becomes a question in the review.
+function askComment(quote, chunkId, a) {
+  const chunk = session.chunks.get(chunkId);
+  const dlg = make('<div class="term-float term-pop" role="dialog" aria-label="Comment on the selected text" tabindex="-1"></div>');
+  dlg.append(h('blockquote', 'quote', quote), bodyForm({
+    label: 'Your comment',
+    blocked: chunk.c.sha ? '' : NO_SHA,
+    send: (body) => postReview({ action: 'question', ...chunkRef(chunk), quote, body }),
+    done: (f, review) => { f.replaceWith(h('p', 'sent', `Comment ${lastId(review)} added to the review.`)); place(dlg, a); },
+    cancel: closePop,
+  }));
+  mount(dlg, a);
+  $('textarea', dlg).focus({ preventScroll: true });
+}
 
 fetch('/api/version').then((r) => r.json()).then((v) => {
   document.getElementById('version').textContent = 'Diffsplainer' + (v.version ? ` ${v.version}` : '') +(v.commit ? ` (${v.commit})` : '');
