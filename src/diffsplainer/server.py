@@ -63,6 +63,12 @@ _term_cache: OrderedDict[tuple, dict] = OrderedDict()
 _cache_lock = threading.Lock()
 
 
+def tree_order(path: str) -> list[tuple[int, str]]:
+    """Sort key for GitHub's file-tree order: directories before files, case-insensitive."""
+    *dirs, name = path.split("/")
+    return [(0, d.casefold()) for d in dirs] + [(1, name.casefold())]
+
+
 def load_pr(owner: str, repo: str, num: int) -> dict:
     key = f"{owner}/{repo}/{num}"
     with _cache_lock:
@@ -96,7 +102,7 @@ def load_pr(owner: str, repo: str, num: int) -> dict:
             "deletions": pr.get("deletions", 0),
             "changed_files": pr.get("changed_files", len(raw_files)),
         },
-        "files": chunk_files(raw_files),
+        "files": chunk_files(sorted(raw_files, key=lambda f: tree_order(f["filename"]))),
         "_raw": pr,
     }
     with _cache_lock:

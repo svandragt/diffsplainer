@@ -453,3 +453,24 @@ def test_dot_segments_are_not_owner_or_repo_names(monkeypatch, serve, path):
 )
 def test_pr_path(arg, path):
     assert server.pr_path(arg) == path
+
+
+def test_load_pr_orders_files_like_the_files_changed_tab(monkeypatch):
+    server._pr_cache.clear()
+    _stub_github(monkeypatch)
+    wanted = [
+        "skills/b/references/evidence/cited.jsonl",
+        "skills/b/references/principles/P1.md",
+        "skills/b/references/principles/p2.md",
+        "skills/b/references/index.json",
+        "skills/b/scripts/build.mjs",
+        "skills/b/SKILL.md",
+        ".gitattributes",
+        "README.md",
+    ]
+    api_order = sorted(wanted)
+    assert api_order != wanted
+    monkeypatch.setattr(server.gh, "get_pull_files", lambda *_: [{"filename": p} for p in api_order])
+    files = server.load_pr("o", "r", 1)["files"]
+    assert [f["filename"] for f in files] == wanted
+    assert [f["index"] for f in files] == list(range(len(wanted)))
