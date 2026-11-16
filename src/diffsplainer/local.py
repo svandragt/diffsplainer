@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 from . import review
@@ -14,7 +15,7 @@ from .diff import chunk_files, tree_order
 
 DEFAULT_REFS = ("refs/remotes/origin/HEAD", "refs/heads/main", "refs/heads/master")
 BLAME_RE = re.compile(
-    r"^([0-9a-f]{40}) \d+ (\d+)", re.MULTILINE
+    rf"^({review.SHA_RE.pattern}) \d+ (\d+)", re.MULTILINE
 )  # `--porcelain` entry line: sha, original line, final line
 STATUS = {"A": "added", "D": "removed", "R": "renamed"}
 
@@ -68,14 +69,16 @@ def diff_files(repo: Path, base: str, head: str) -> list[dict]:
     """The combined diff as GitHub-style file dicts (`patch`, `status`, ...), in the order of the Files changed tab."""
     args = ["diff", "-M", "--no-color", "--no-ext-diff", "-U3"]
     tokens = git(repo, *args, "--name-status", "-z", base, head).split("\0")[:-1]
-    patches = ("\n" + git(repo, *args, base, head)).split("\ndiff --git ")[1:]  # one per file, same order as the names
+    patches = iter(("\n" + git(repo, *args, base, head)).split("\ndiff --git ")[1:])  # same order as the names
     files, i = [], 0
-    for patch in patches:
+    while i < len(tokens):
         status = tokens[i]
         names = tokens[i + 1 : i + 3] if status[0] == "R" else tokens[i + 1 : i + 2]
         i += 1 + len(names)
-        start = patch.find("\n@@ ")  # a binary file, a pure rename or a mode change has no hunks
-        body = patch[start + 1 :] if start >= 0 else ""
+        # A type change (file to symlink, say) prints a deletion and a creation for its one name-status entry.
+        parts = [next(patches, "") for _ in range(2 if status[0] == "T" else 1)]
+        starts = [(p, p.find("\n@@ ")) for p in parts]  # a binary file, a pure rename or a mode change has no hunks
+        body = "\n".join(p[s + 1 :].rstrip("\n") for p, s in starts if s >= 0)
         lines = body.split("\n")
         files.append(
             {
@@ -110,22 +113,32 @@ def tag_chunks(repo: Path, base: str, head: str, commits: list[dict], files: lis
         for c in f["chunks"]:
             adds = [l["n"] for l in c["lines"] if l["t"] == "add"]
             if adds:
-                written = written or blame(repo, rev_range, f["filename"])
+                written = blame(repo, rev_range, f["filename"]) if written is None else written
                 i = max((pos.get(written.get(n), -1) for n in adds), default=-1)
             else:
                 # Reverse blame names the last commit a line existed in; the commit after it deleted the line.
-                deleted = deleted or blame(repo, rev_range, f["previous"] or f["filename"], "--reverse")
+                deleted = (
+                    blame(repo, rev_range, f["previous"] or f["filename"], "--reverse") if deleted is None else deleted
+                )
                 last = (deleted.get(l["o"]) for l in c["lines"] if l["t"] == "del")
                 i = max((pos[sha] + 1 for sha in last if sha in pos), default=-1)
             c["sha"] = shas[i] if 0 <= i < len(shas) else None
 
 
-def load(repo: Path) -> dict:
-    """The commits under review, their combined diff chunked and tagged with commits, and the review file."""
-    base, head = current_range(repo)
+@lru_cache(maxsize=8)
+def changes(repo: Path, base: str, head: str) -> tuple[list[dict], list[dict]]:
+    """The commits and tagged chunks of a range. Cached because the page, the explain stream and every term click load
+    them, and blame runs once per file; shas fix the result. Callers must not modify it."""
     commits = list_commits(repo, base, head)
     files = chunk_files(diff_files(repo, base, head))
     tag_chunks(repo, base, head, commits, files)
+    return commits, files
+
+
+def load(repo: Path) -> dict:
+    """The commits under review, their combined diff chunked and tagged with commits, and the review file."""
+    base, head = current_range(repo)
+    commits, files = changes(repo, base, head)
     branch = git(repo, "branch", "--show-current").strip() or "HEAD"
     return {
         "local": {"branch": branch, "base": base, "head": head, "commits": commits},

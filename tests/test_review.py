@@ -177,3 +177,13 @@ def test_a_write_goes_through_a_temporary_file_that_replaces_the_review(repo, mo
     assert len(during["reviews"]) == 1  # the file still held the old content at the swap
     assert len(read(repo)["reviews"]) == 2
     assert os.listdir(dst.parent) == ["review.json"]
+
+
+def test_a_failed_write_leaves_no_temporary_file(repo, monkeypatch):
+    def fail(*_):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(review.os, "replace", fail)
+    with pytest.raises(OSError):
+        review.approve(repo.path, repo.a)
+    assert list(review.path(repo.path).parent.iterdir()) == []

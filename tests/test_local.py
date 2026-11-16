@@ -52,6 +52,16 @@ def test_load_keeps_a_renamed_file_with_its_previous_name_and_a_binary_file_with
     assert files["img.bin"]["chunks"] == []
 
 
+def test_load_keeps_a_file_that_became_a_symlink_as_one_file_and_the_files_after_it_in_line(repo):
+    # git diff prints a deletion and a creation for a type change, but --name-status lists it once
+    (repo.path / "a.py").unlink()
+    (repo.path / "a.py").symlink_to("b.py")
+    repo.commit("a.py becomes a symlink")
+    files = {f["filename"]: f for f in local.load(repo.path)["files"]}
+    assert sorted(files) == ["a.py", "b.py", "drop.txt", "gone.txt"]
+    assert files["a.py"]["chunks"] and files["b.py"]["status"] == "added"
+
+
 def test_load_ignores_uncommitted_changes(repo):
     repo.dirty()
     names = {f["filename"] for f in local.load(repo.path)["files"]}
@@ -180,3 +190,16 @@ def test_load_outside_a_repository_is_a_value_error(tmp_path):
         local.load(tmp_path)
     with pytest.raises(ValueError):
         local.load(tmp_path / "missing")
+
+
+def test_load_tags_chunks_in_a_sha256_repository(repo, tmp_path):
+    path = tmp_path / "sha256"
+    repo.git("init", "-q", "--object-format=sha256", "-b", "main", str(path), cwd=tmp_path)
+    (path / "f.txt").write_text("one\n")
+    repo.git("add", "-A", cwd=path)
+    repo.git("commit", "-q", "-m", "Base", cwd=path)
+    repo.git("checkout", "-q", "-b", "feature", cwd=path)  # main stays at Base, the default branch to compare with
+    (path / "f.txt").write_text("one\ntwo\n")
+    repo.git("commit", "-q", "-am", "Add two", cwd=path)
+    head = repo.git("rev-parse", "HEAD", cwd=path)
+    assert chunk_shas(local.load(path)) == {"f.txt": {head}}

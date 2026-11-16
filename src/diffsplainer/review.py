@@ -68,8 +68,11 @@ def update(repo: Path, change) -> dict:
         p = path(repo)
         p.parent.mkdir(exist_ok=True)
         tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")  # not a name the agent is likely to pick
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        os.replace(tmp, p)
+        try:
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            os.replace(tmp, p)
+        finally:
+            tmp.unlink(missing_ok=True)
         return data
 
 

@@ -375,7 +375,7 @@ const NO_SHA = 'Git could not tell which commit wrote this chunk, so it cannot g
 async function loadLocal(seq) {
   const res = await fetch('/api/local').catch(() => null);
   if (!res || res.status === 404) return seq === loadSeq && setApp(emptyHtml);
-  const data = await res.json();
+  const data = await res.json().catch(() => ({ error: `Error ${res.status}` })); // #app stays hidden until a setApp
   if (seq !== loadSeq) return;
   document.title = 'Unpushed commits · Diffsplainer';
   if (!res.ok) return setApp(`<div class="card">Could not load the commits: ${esc(data.error)}</div>`);
