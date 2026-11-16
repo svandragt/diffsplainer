@@ -372,7 +372,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const NO_SHA = 'Git could not tell which commit wrote this chunk, so it cannot go into the review.';
 
 // `/` is the start page in PR mode; with `--local` it is the commit review (`/api/local` answers 404 otherwise).
-async function loadLocal(seq, recorded = false) {
+async function loadLocal(seq, recorded = '') {
   const res = await fetch('/api/local').catch(() => null);
   if (!res || res.status === 404) return seq === loadSeq && setApp(emptyHtml);
   const data = await res.json().catch(() => ({ error: `Error ${res.status}` })); // #app stays hidden until a setApp
@@ -423,12 +423,12 @@ async function act(body, err, after) {
   } catch (e) { err.textContent = e.message; }
 }
 
-// After Finish review: load the range again, as the next run would, and keep the confirmation on the empty range.
-function reloadLocal() {
+// After a round ends: load the range again, as the next run would, and keep the confirmation `recorded` on the empty range.
+function reloadLocal(recorded) {
   const seq = ++loadSeq;
   if (source) source.close();
   source = null;
-  loadLocal(seq, true);
+  loadLocal(seq, recorded);
 }
 
 function renderCommits() {
@@ -445,16 +445,8 @@ function renderCommits() {
       d.append(h('summary', null, c.subject), h('pre', 'commit-body', c.body));
       what.append(d);
     } else what.append(h('span', null, c.subject));
-    const side = h('div', 'side');
-    if (session.review.approved.includes(c.sha)) side.append(h('span', 'pill', 'Approved'));
-    else {
-      const btn = button('Approve', 'primary');
-      const err = h('span', 'err');
-      btn.addEventListener('click', () => act({ action: 'approve', sha: c.sha }, err));
-      side.append(btn, err);
-    }
     const li = h('li');
-    li.append(h('code', 'sha', c.sha.slice(0, 7)), what, side);
+    li.append(h('code', 'sha', c.sha.slice(0, 7)), what);
     list.append(li);
   }
   box.replaceChildren(h('h2', null, 'Commits'), list);
@@ -477,12 +469,19 @@ function renderReview() {
   }
   if (!info.commits.length && !session.recorded) return;
   const foot = h('div', 'finish');
-  if (review.reviews.at(-1)?.head === info.head) foot.append(h('p', null, 'Review recorded — the next run shows only new commits.'));
+  if (session.recorded) foot.append(h('p', null, session.recorded));
   else {
-    const btn = button('Finish review', 'primary');
+    // One button ends the round: with open entries it hands them to the agent, with none it approves every commit.
+    const approve = !open.length;
+    const btn = button(approve ? 'Approve all and finish' : `Send ${plural(open.length, 'comment')} to agent`, 'primary');
     const err = h('span', 'err');
     btn.title = 'Records this HEAD, so the next run shows only commits after it';
-    btn.addEventListener('click', () => act({ action: 'start', head: info.head }, err, reloadLocal));
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const recorded = `${approve ? 'Approved' : 'Sent to the agent'}. The next run shows only new commits.`;
+      await act({ action: 'start', head: info.head, ...(approve && { approve }) }, err, () => reloadLocal(recorded));
+      btn.disabled = false;
+    });
     foot.append(btn, err);
   }
   box.append(foot);

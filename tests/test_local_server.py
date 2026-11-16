@@ -77,17 +77,38 @@ def test_local_routes_are_404_in_pr_mode(serve, monkeypatch, method, path):
 
 def test_posting_a_review_is_404_in_pr_mode(serve, monkeypatch):
     monkeypatch.setattr(server, "LOCAL_REPO", None)
-    assert post(serve, {"action": "approve", "sha": "a" * 40})[0] == 404
+    assert post(serve, {"action": "start", "head": "a" * 40})[0] == 404
 
 
 def test_get_on_the_review_endpoint_is_405(serve, local_repo):
     assert send(serve, "GET", "/api/review")[0] == 405
 
 
-def test_approve_over_http_adds_the_approval(serve, local_repo):
-    status, data = post(serve, {"action": "approve", "sha": local_repo.a})
-    assert status == 200 and data["review"]["approved"] == [local_repo.a]
-    assert review_file(local_repo)["approved"] == [local_repo.a]
+def test_the_approve_action_is_gone(serve, local_repo):
+    assert post(serve, {"action": "approve", "sha": local_repo.a})[0] == 400
+    assert review_file(local_repo) is None
+
+
+def test_start_with_approve_over_http_records_one_round_and_approves_every_commit(serve, local_repo):
+    status, data = post(serve, {"action": "start", "head": local_repo.b, "approve": True})
+    assert status == 200 and sorted(data["review"]["approved"]) == sorted([local_repo.a, local_repo.b])
+    got = review_file(local_repo)
+    assert sorted(got["approved"]) == sorted([local_repo.a, local_repo.b])
+    assert [r["head"] for r in got["reviews"]] == [local_repo.b]
+
+
+def test_start_without_approve_over_http_approves_nothing(serve, local_repo):
+    assert post(serve, {"action": "start", "head": local_repo.b})[0] == 200
+    assert review_file(local_repo)["approved"] == []
+
+
+def test_start_with_approve_is_a_400_while_an_entry_is_open_and_writes_nothing_more(serve, local_repo):
+    chunk = {"sha": local_repo.a, "file": "a.py", "lines": "1", "diff": "+x", "body": "b"}
+    assert post(serve, {"action": "change", **chunk})[0] == 200
+    before = review_file(local_repo)
+    status, data = post(serve, {"action": "start", "head": local_repo.b, "approve": True})
+    assert status == 400 and "open" in data["error"]
+    assert review_file(local_repo) == before
 
 
 def test_request_changes_and_a_comment_over_http_add_entries(serve, local_repo):
@@ -113,8 +134,8 @@ def test_start_over_http_records_the_head_and_the_next_load_shows_only_new_commi
 
 
 def test_a_commit_outside_the_range_is_a_400_and_writes_nothing(serve, local_repo):
-    assert post(serve, {"action": "approve", "sha": local_repo.base})[0] == 400
-    assert post(serve, {"action": "approve", "sha": "--output=x"})[0] == 400
+    assert post(serve, {"action": "start", "head": local_repo.base})[0] == 400
+    assert post(serve, {"action": "start", "head": "--output=x", "approve": True})[0] == 400
     assert review_file(local_repo) is None
 
 
@@ -124,7 +145,7 @@ def test_a_body_that_is_not_a_json_object_is_a_400(serve, local_repo, body):
     assert review_file(local_repo) is None
 
 
-APPROVE = {"action": "approve", "sha": "a" * 40}
+START = {"action": "start", "head": "a" * 40}
 
 
 @pytest.mark.parametrize(
@@ -140,25 +161,25 @@ APPROVE = {"action": "approve", "sha": "a" * 40}
     ],
 )
 def test_a_post_that_is_not_from_the_apps_own_page_is_refused_and_writes_nothing(serve, local_repo, headers, status):
-    assert post(serve, {**APPROVE, "sha": local_repo.a}, **headers)[0] == status
+    assert post(serve, {**START, "head": local_repo.a}, **headers)[0] == status
     assert review_file(local_repo) is None
 
 
 def test_a_post_without_a_sec_fetch_site_header_is_refused(serve, local_repo):
-    body = {**APPROVE, "sha": local_repo.a}
+    body = {**START, "head": local_repo.a}
     assert send(serve, "POST", "/api/review", body, {"Content-Type": "application/json"})[0] == 403
     assert review_file(local_repo) is None
 
 
 def test_a_post_without_a_content_type_is_refused(serve, local_repo):
-    body = {**APPROVE, "sha": local_repo.a}
+    body = {**START, "head": local_repo.a}
     assert send(serve, "POST", "/api/review", body, {"Sec-Fetch-Site": "same-origin"})[0] == 415
     assert review_file(local_repo) is None
 
 
 def test_a_post_with_a_foreign_host_is_refused_in_pr_mode_too(serve, monkeypatch):
     monkeypatch.setattr(server, "LOCAL_REPO", None)
-    assert post(serve, APPROVE, Host="attacker.example")[0] == 403
+    assert post(serve, START, Host="attacker.example")[0] == 403
 
 
 def test_a_post_without_a_length_is_refused(serve, local_repo):
@@ -185,8 +206,8 @@ def test_a_post_to_another_path_is_404(serve, local_repo):
 def test_the_request_cannot_name_a_repository(serve, local_repo, tmp_path):
     other = tmp_path / "other"
     other.mkdir()
-    post(serve, {**APPROVE, "sha": local_repo.a, "repo": str(other), "path": str(other)})
-    assert review_file(local_repo)["approved"] == [local_repo.a]
+    post(serve, {**START, "head": local_repo.a, "repo": str(other), "path": str(other)})
+    assert [r["head"] for r in review_file(local_repo)["reviews"]] == [local_repo.a]
     assert list(other.iterdir()) == []
 
 
@@ -194,7 +215,7 @@ def test_a_review_file_that_is_not_valid_json_is_a_409_and_stays_as_it_is(serve,
     p = local_repo.path / ".git" / "diffsplainer"
     p.mkdir()
     (p / "review.json").write_text("{broken")
-    status, data = post(serve, {**APPROVE, "sha": local_repo.a})
+    status, data = post(serve, {**START, "head": local_repo.a})
     assert status == 409 and "not valid JSON" in data["error"]
     assert (p / "review.json").read_text() == "{broken"
     assert send(serve, "GET", "/api/local")[0] == 500
@@ -205,11 +226,11 @@ def test_no_write_endpoint_changes_the_work_tree_the_index_or_any_ref(serve, loc
     before = local_repo.state()
     chunk = {"sha": local_repo.a, "file": "a.py", "lines": "1", "diff": "+x", "body": "b"}
     for body in [
-        {"action": "approve", "sha": local_repo.a},
         {"action": "change", **chunk},
         {"action": "question", "quote": "x", **chunk},
         {"action": "status", "id": "r1", "status": "resolved"},
-        {"action": "start", "head": local_repo.b},
+        {"action": "status", "id": "r2", "status": "resolved"},
+        {"action": "start", "head": local_repo.b, "approve": True},
     ]:
         assert post(serve, body)[0] == 200
     send(serve, "GET", "/api/local")
@@ -393,6 +414,6 @@ def test_a_pr_url_leaves_local_mode_off(start):
 def test_a_git_failure_while_checking_the_range_is_a_500_and_writes_nothing(serve, local_repo, tmp_path, monkeypatch):
     (tmp_path / "gone").mkdir()
     monkeypatch.setattr(server, "LOCAL_REPO", tmp_path / "gone")
-    status, data = post(serve, {"action": "approve", "sha": local_repo.a})
+    status, data = post(serve, {"action": "start", "head": local_repo.a})
     assert (status, "git repository" in data["error"]) == (500, True)
     assert review_file(local_repo) is None

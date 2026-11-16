@@ -5,7 +5,7 @@ description: Answer the review comments a person left on unpushed commits in Dif
 
 # Answer Diffsplainer review comments
 
-A person reviews your unpushed commits with `diffsplainer --local`. They approve commits, request changes on a chunk, or ask a question about selected text. Diffsplainer writes these to a JSON file in the repo's git directory. You answer each open entry with a fixup commit or a reply, then wait for the next review.
+A person reviews your unpushed commits with `diffsplainer --local`. They request changes on a chunk or ask a question about selected text, then send the comments to you or approve all the commits. Diffsplainer writes these to a JSON file in the repo's git directory. You answer each open entry with a fixup commit or a reply, then wait for the next review.
 
 ## Find the review file
 
@@ -42,7 +42,7 @@ If the file does not exist, there are no comments.
 - `sha` is the commit the entry is about.
 - `lines` is a hint that goes out of date after the first fixup. Find the place by matching `diff`.
 - `reply` is `null` until you answer.
-- `reviews` lists the HEAD of each review round. `approved` lists approved commits.
+- `reviews` lists the HEAD of each review round. `approved` lists approved commits. Diffsplainer fills it only when the person clicks "Approve all and finish", which adds every commit of that round at once and is possible only when no entry is open.
 
 ## Protocol
 
@@ -55,7 +55,7 @@ If the file does not exist, there are no comments.
 
 ## Wait for the next review
 
-The person clicks Finish review when a round is done, and Diffsplainer then adds an item to `reviews`. Nothing else tells you, so watch the file instead of waiting for the person to tell you. The same wait applies before the first review.
+The person ends a round with one button, "Send N comments to agent" or "Approve all and finish", and Diffsplainer then adds an item to `reviews`. Nothing else tells you, so watch the file instead of waiting for the person to tell you. The same wait applies before the first review.
 
 Record how many items `reviews` has, then wait until it has more:
 
@@ -66,11 +66,13 @@ n=$(count); [ "$n" -lt 0 ] && n=0
 until [ "$(count)" -gt "$n" ]; do sleep 20; done
 ```
 
-Run it with your harness's background wait, so you use nothing while you wait; in Claude Code, that is the Monitor tool. When it returns, start again at step 1. A file that is missing or mid-write counts as -1, so the wait continues. Comments the person adds before Finish review are part of that round: answer them after the wait returns, not as they appear.
+Run it with your harness's background wait, so you use nothing while you wait; in Claude Code, that is the Monitor tool. A file that is missing or mid-write counts as -1, so the wait continues. Comments the person adds before they end the round are part of that round: answer them after the wait returns, not as they appear.
+
+When the wait returns, check for approval first. The round's commits are `git log --format=%H <previous reviews[].head>..<newest reviews[].head>`, or all unpushed commits in the first round. If the newest round has no entry with `status` `open` and every commit of the round is in `approved`, the person approved the work. Stop waiting and tell the person the commits are approved and ready for them to rebase and push. Otherwise start again at step 1.
 
 ## Rules
 
-- Write only `reply`. Never change `status`, `body`, `quote`, `diff`, `sha`, `lines`, `id`, `created`, `reviews` or `approved`. The person resolves entries and approves commits in Diffsplainer.
+- Write only `reply`. Never change `status`, `body`, `quote`, `diff`, `sha`, `lines`, `id`, `created`, `reviews` or `approved`. The person resolves entries and approves commits ("Approve all and finish") in Diffsplainer.
 - Keep every field you do not know, on every entry and at the top level.
 - Do not add, delete or reorder entries.
 - If the file is not valid JSON, do not write to it. Tell the person.

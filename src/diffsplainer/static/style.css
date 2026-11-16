@@ -94,8 +94,7 @@ main { max-width: 1600px; margin: 0 auto; padding: 16px; }
 .commit-list .what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .commit-list summary { cursor: pointer; }
 .commit-body { margin: 6px 0 0; font: inherit; white-space: pre-wrap; color: var(--muted); }
-.side { display: flex; gap: 8px; align-items: center; }
-.commits .err, .review .err, .body-form .err { color: var(--minus); font-size: 13px; }
+.review .err, .body-form .err { color: var(--minus); font-size: 13px; }
 .none { margin: 0; color: var(--muted); }
 .entry { border-top: 1px solid var(--border); padding: 10px 0; }
 .entry-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }

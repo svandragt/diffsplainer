@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import threading
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -98,12 +99,18 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def start_review(repo: Path, head: str) -> dict:
-    return update(repo, lambda d: d["reviews"].append({"head": head, "at": _now()}))
+def start_review(repo: Path, head: str, approve: Iterable[str] = ()) -> dict:
+    """End a round: record `head`, and approve the commits in `approve`, in one write so the agent never sees one
+    without the other. Approving while an entry is open contradicts itself, so that is refused."""
 
+    def change(d):
+        approving = list(approve)
+        if approving and any(isinstance(e, dict) and e.get("status") != "resolved" for e in d["entries"]):
+            raise ValueError("Resolve the open comments before approving")
+        d["reviews"].append({"head": head, "at": _now()})
+        d["approved"].extend(s for s in approving if s not in d["approved"])
 
-def approve(repo: Path, sha: str) -> dict:
-    return update(repo, lambda d: None if sha in d["approved"] else d["approved"].append(sha))
+    return update(repo, change)
 
 
 def add_entry(repo: Path, kind: str, sha: str, file: str, lines: str, diff: str, quote: str | None, body: str) -> dict:
@@ -150,15 +157,16 @@ def apply(repo: Path, req, shas: set[str]) -> dict:
     action = req.get("action")
     if action == "status":
         return set_status(repo, req.get("id"), req.get("status"))
-    if action not in ("start", "approve", "change", "question"):
+    if action not in ("start", "change", "question"):
         raise ValueError(f"Unknown action {action!r}")
     sha = req.get("head" if action == "start" else "sha")
     if not isinstance(sha, str) or sha not in shas:
         raise ValueError("The commit is not in the range under review")
     if action == "start":
-        return start_review(repo, sha)
-    if action == "approve":
-        return approve(repo, sha)
+        approve = req.get("approve", False)
+        if not isinstance(approve, bool):
+            raise ValueError("approve must be true or false")
+        return start_review(repo, sha, sorted(shas) if approve else ())
     fields = {k: req.get(k) for k in _ENTRY_FIELDS}
     if not all(isinstance(v, str) for v in fields.values()) or not fields["body"].strip():
         raise ValueError("file, lines, diff and body must be strings, and body must not be empty")
