@@ -37,12 +37,16 @@ def path(repo: Path) -> Path:
     return Path(r.stdout.strip()) / "diffsplainer" / "review.json"
 
 
-def read(repo: Path) -> dict:
-    p = path(repo)
+def _raw(p: Path) -> bytes | None:
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        return p.read_bytes()
     except FileNotFoundError:
-        data = {}
+        return None
+
+
+def _parse(p: Path, raw: bytes | None) -> dict:
+    try:
+        data = {} if raw is None else json.loads(raw.decode("utf-8"))
     except ValueError as e:  # a JSON or a UTF-8 error
         raise ReviewError(f"{p} is not valid JSON ({e}). Fix or delete it.") from None
     if not isinstance(data, dict):
@@ -53,6 +57,11 @@ def read(repo: Path) -> dict:
     return data
 
 
+def read(repo: Path) -> dict:
+    p = path(repo)
+    return _parse(p, _raw(p))
+
+
 def last_head(data: dict) -> str | None:
     """The HEAD sha of the newest review round, or None when it is missing or not a sha."""
     newest = data["reviews"][-1] if data["reviews"] else None
@@ -60,20 +69,29 @@ def last_head(data: dict) -> str | None:
     return head if isinstance(head, str) and SHA_RE.fullmatch(head) else None
 
 
-def update(repo: Path, change) -> dict:
-    """Re-read the file, let `change(data)` edit it, and write it back atomically. Returns the new data."""
+def update(repo: Path, change, attempts: int = 5) -> dict:
+    """Let `change(data)` edit the file's data and write it back atomically. Returns the new data.
+
+    The lock only covers this process, and the agent writes from another one. If the file differs from what was read
+    when the write is about to replace it, `change` runs again on the fresh data, so it must be safe to run twice.
+    """
     with _lock:
-        data = read(repo)
-        change(data)
         p = path(repo)
-        p.parent.mkdir(exist_ok=True)
-        tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")  # not a name the agent is likely to pick
-        try:
-            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-            os.replace(tmp, p)
-        finally:
-            tmp.unlink(missing_ok=True)
-        return data
+        for _ in range(attempts):
+            raw = _raw(p)
+            data = _parse(p, raw)
+            change(data)
+            if _raw(p) != raw:
+                continue  # shortcut: the agent can still write between this check and the replace
+            p.parent.mkdir(exist_ok=True)
+            tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")  # not a name the agent is likely to pick
+            try:
+                tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                os.replace(tmp, p)
+            finally:
+                tmp.unlink(missing_ok=True)
+            return data
+    raise ReviewError(f"{p.name} keeps changing; try again")
 
 
 def _now() -> str:

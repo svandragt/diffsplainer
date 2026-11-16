@@ -372,18 +372,18 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const NO_SHA = 'Git could not tell which commit wrote this chunk, so it cannot go into the review.';
 
 // `/` is the start page in PR mode; with `--local` it is the commit review (`/api/local` answers 404 otherwise).
-async function loadLocal(seq) {
+async function loadLocal(seq, recorded = false) {
   const res = await fetch('/api/local').catch(() => null);
   if (!res || res.status === 404) return seq === loadSeq && setApp(emptyHtml);
   const data = await res.json().catch(() => ({ error: `Error ${res.status}` })); // #app stays hidden until a setApp
   if (seq !== loadSeq) return;
   document.title = 'Unpushed commits · Diffsplainer';
   if (!res.ok) return setApp(`<div class="card">Could not load the commits: ${esc(data.error)}</div>`);
-  renderLocal(data);
+  renderLocal(data, recorded);
 }
 
-function renderLocal({ local: info, files, review }) {
-  session = { info, review, chunks: new Map() };
+function renderLocal({ local: info, files, review }, recorded) {
+  session = { info, review, chunks: new Map(), recorded };
   files.forEach((f) => f.chunks.forEach((c) => session.chunks.set(c.id, { file: f.filename, c })));
   const n = info.commits.length;
   const sum = (key) => files.reduce((t, f) => t + f[key], 0);
@@ -416,8 +416,19 @@ async function postReview(body) {
 }
 
 // A button's request. A refused one puts the server's message in `err`, next to the button.
-async function act(body, err) {
-  try { await postReview(body); } catch (e) { err.textContent = e.message; }
+async function act(body, err, after) {
+  try {
+    await postReview(body);
+    after?.();
+  } catch (e) { err.textContent = e.message; }
+}
+
+// After Finish review: load the range again, as the next run would, and keep the confirmation on the empty range.
+function reloadLocal() {
+  const seq = ++loadSeq;
+  if (source) source.close();
+  source = null;
+  loadLocal(seq, true);
 }
 
 function renderCommits() {
@@ -464,14 +475,14 @@ function renderReview() {
     d.append(h('summary', null, `Resolved (${resolved.length})`), ...resolved.map(renderEntry));
     box.append(d);
   }
-  if (!info.commits.length) return;
+  if (!info.commits.length && !session.recorded) return;
   const foot = h('div', 'finish');
   if (review.reviews.at(-1)?.head === info.head) foot.append(h('p', null, 'Review recorded — the next run shows only new commits.'));
   else {
     const btn = button('Finish review', 'primary');
     const err = h('span', 'err');
     btn.title = 'Records this HEAD, so the next run shows only commits after it';
-    btn.addEventListener('click', () => act({ action: 'start', head: info.head }, err));
+    btn.addEventListener('click', () => act({ action: 'start', head: info.head }, err, reloadLocal));
     foot.append(btn, err);
   }
   box.append(foot);

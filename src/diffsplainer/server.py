@@ -264,7 +264,10 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return self.send_json(400, {"error": "The body is not JSON"})
         try:
-            shas = {c["sha"] for c in local.list_commits(LOCAL_REPO, *local.current_range(LOCAL_REPO))}
+            try:
+                shas = {c["sha"] for c in local.list_commits(LOCAL_REPO, *local.current_range(LOCAL_REPO))}
+            except ValueError as e:  # git failed: not the request's fault
+                return self.send_json(500, {"error": str(e)})
             data = review.apply(LOCAL_REPO, req, shas)
         except review.ReviewError as e:
             return self.send_json(409, {"error": str(e)})

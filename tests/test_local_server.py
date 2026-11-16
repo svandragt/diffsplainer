@@ -388,3 +388,11 @@ def test_local_flag_on_a_branch_without_a_base_exits_with_the_reason(start, repo
 def test_a_pr_url_leaves_local_mode_off(start):
     assert start("https://github.com/o/r/pull/1") == [f"http://localhost:{server.PORT}/o/r/pull/1"]
     assert server.LOCAL_REPO is None
+
+
+def test_a_git_failure_while_checking_the_range_is_a_500_and_writes_nothing(serve, local_repo, tmp_path, monkeypatch):
+    (tmp_path / "gone").mkdir()
+    monkeypatch.setattr(server, "LOCAL_REPO", tmp_path / "gone")
+    status, data = post(serve, {"action": "approve", "sha": local_repo.a})
+    assert (status, "git repository" in data["error"]) == (500, True)
+    assert review_file(local_repo) is None

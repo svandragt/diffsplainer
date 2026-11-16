@@ -187,3 +187,58 @@ def test_a_failed_write_leaves_no_temporary_file(repo, monkeypatch):
     with pytest.raises(OSError):
         review.approve(repo.path, repo.a)
     assert list(review.path(repo.path).parent.iterdir()) == []
+
+
+def agent_writes_once_during(repo, change, rewrite):
+    """A `change` that runs `rewrite(data)` on the file once, as the agent would after Diffsplainer's read."""
+    calls = []
+
+    def wrapped(d):
+        calls.append(None)
+        if len(calls) == 1:
+            p = review.path(repo.path)
+            data = json.loads(p.read_text()) if p.exists() else {}
+            rewrite(data)
+            p.parent.mkdir(exist_ok=True)
+            p.write_text(json.dumps(data))
+        change(d)
+
+    return wrapped, calls
+
+
+def test_a_reply_written_between_the_read_and_the_replace_is_kept_and_the_change_is_applied(repo):
+    entry(repo)
+
+    def reply(data):
+        data["entries"][0]["reply"] = "Fixed in a fixup."
+
+    change, calls = agent_writes_once_during(repo, lambda d: d["approved"].append(repo.b), reply)
+    review.update(repo.path, change)
+    got = read(repo)
+    assert got["entries"][0]["reply"] == "Fixed in a fixup."
+    assert got["approved"] == [repo.b]
+    assert len(calls) == 2
+
+
+def test_a_file_the_agent_creates_between_the_read_and_the_replace_is_kept(repo):
+    change, _ = agent_writes_once_during(
+        repo, lambda d: d["approved"].append(repo.b), lambda data: data.update(reviews=[{"head": repo.a}])
+    )
+    review.update(repo.path, change)
+    got = read(repo)
+    assert got["reviews"] == [{"head": repo.a}]
+    assert got["approved"] == [repo.b]
+
+
+def test_a_file_that_keeps_changing_is_a_review_error_and_keeps_the_agents_write(repo):
+    calls = []
+
+    def change(d):
+        calls.append(None)
+        review.path(repo.path).parent.mkdir(exist_ok=True)
+        review.path(repo.path).write_text(json.dumps({"agent": len(calls)}))
+
+    with pytest.raises(review.ReviewError, match="keeps changing"):
+        review.update(repo.path, change)
+    assert read(repo)["agent"] == len(calls)
+    assert os.listdir(review.path(repo.path).parent) == ["review.json"]
