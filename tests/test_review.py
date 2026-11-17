@@ -186,6 +186,17 @@ def test_start_names_the_head_and_the_head_must_be_in_the_range(repo):
         review.apply(repo.path, {"action": "start", "head": "--output=x"}, {repo.a, repo.b})
 
 
+def test_an_empty_range_takes_the_current_head_for_a_round_and_a_general_comment_only(repo):
+    review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, set(), repo.b)
+    general = {"action": "change", "sha": repo.b, "file": "", "lines": "", "diff": "", "body": "Split this up."}
+    review.apply(repo.path, general, set(), repo.b)
+    got = read(repo)
+    assert (got["approved"], [r["head"] for r in got["reviews"]], len(got["entries"])) == ([], [repo.b], 1)
+    for req in ({"action": "start", "head": repo.a}, {**general, "sha": repo.a}, {**general, "file": "a.py"}):
+        with pytest.raises(ValueError):
+            review.apply(repo.path, req, set(), repo.b)
+
+
 def test_a_write_keeps_a_reply_the_agent_wrote_after_the_page_loaded(repo):
     entry(repo)
     review.read(repo.path)  # the page loads the review here

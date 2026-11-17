@@ -101,7 +101,7 @@ until [ "$(count)" -gt "$n" ]; do sleep 20; done
 
 Run it with your harness's background wait, so you use nothing while you wait; in Claude Code, that is the Monitor tool. A file that is missing or mid-write counts as -1, so the wait continues. Comments the person adds before they end the round are part of that round: answer them after the wait returns, not as they appear.
 
-When the wait returns, check for approval first. The round's commits are `git log --format=%H <previous reviews[].head>..<newest reviews[].head>`, or all unpushed commits in the first round. If the newest round has no entry with `status` `open` and every commit of the round is in `approved`, the person approved the work. Stop waiting, stop the server you started, and tell the person the commits are approved and ready for them to rebase and push. Otherwise start again at step 1.
+When the wait returns, check for approval first. The round's commits are `git log --format=%H <previous reviews[].head>..<newest reviews[].head>`, or all unpushed commits in the first round. If the newest round has no entry with `status` `open` and every commit of the round is in `approved`, the person approved the work. A round with no commits (answering with replies only leaves the range empty) has nothing to approve, so with no open entry it counts as approval too: the person can end it only with "Approve all and finish". Stop waiting, stop the server you started, and tell the person the commits are approved and ready for them to rebase and push. Otherwise start again at step 1.
 
 ## Rules
 

@@ -116,16 +116,17 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def start_review(repo: Path, head: str, approve: Iterable[str] = ()) -> dict:
-    """End a round: record `head`, and approve the commits in `approve`, in one write so the agent never sees one
-    without the other. Approving while an entry is open contradicts itself, so that is refused."""
+def start_review(repo: Path, head: str, approve: Iterable[str] | None = None) -> dict:
+    """End a round: record `head`, and approve the commits in `approve` (None: approve nothing, an empty list: approve
+    an empty round), in one write so the agent never sees one without the other. Approving while an entry is open
+    contradicts itself, so that is refused."""
 
     def change(d):
-        approving = list(approve)
-        if approving and any(isinstance(e, dict) and e.get("status") != "resolved" for e in d["entries"]):
+        approving = None if approve is None else list(approve)
+        if approving is not None and any(isinstance(e, dict) and e.get("status") != "resolved" for e in d["entries"]):
             raise ValueError("Resolve the open comments before approving")
         d["reviews"].append({"head": head, "at": _now()})
-        d["approved"].extend(s for s in approving if s not in d["approved"])
+        d["approved"].extend(s for s in approving or () if s not in d["approved"])
 
     return update(repo, change)
 
@@ -167,8 +168,10 @@ def set_status(repo: Path, entry_id, status) -> dict:
     return update(repo, change)
 
 
-def apply(repo: Path, req, shas: set[str]) -> dict:
-    """Run one request from the page. `shas` are the commits under review: the only ones a request may name."""
+def apply(repo: Path, req, shas: set[str], head: str | None = None) -> dict:
+    """Run one request from the page. `shas` are the commits under review: the only ones a request may name. `head` is
+    the current HEAD, which also names a round's head and a general comment's commit: an agent that replies without
+    committing leaves `shas` empty, and the round still has to end."""
     if not isinstance(req, dict):
         raise ValueError("The request must be a JSON object")  # noqa: TRY004 - the server answers ValueError with 400
     action = req.get("action")
@@ -177,13 +180,14 @@ def apply(repo: Path, req, shas: set[str]) -> dict:
     if action not in ("start", "change", "question"):
         raise ValueError(f"Unknown action {action!r}")
     sha = req.get("head" if action == "start" else "sha")
-    if not isinstance(sha, str) or sha not in shas:
+    general = action == "change" and req.get("file") == ""
+    if not isinstance(sha, str) or not (sha in shas or sha == head and (action == "start" or general)):
         raise ValueError("The commit is not in the range under review")
     if action == "start":
         approve = req.get("approve", False)
         if not isinstance(approve, bool):
             raise ValueError("approve must be true or false")
-        return start_review(repo, sha, sorted(shas) if approve else ())
+        return start_review(repo, sha, sorted(shas) if approve else None)
     fields = {k: req.get(k) for k in _ENTRY_FIELDS}
     if not all(isinstance(v, str) for v in fields.values()) or not fields["body"].strip():
         raise ValueError("file, lines, diff and body must be strings, and body must not be empty")

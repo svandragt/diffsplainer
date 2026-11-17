@@ -495,7 +495,7 @@ function renderReview() {
     d.append(h('summary', null, `Resolved (${resolved.length})`), ...resolved.map(renderEntry));
     box.append(d);
   }
-  if (!info.commits.length && !session.recorded) return;
+  if (!info.commits.length && !entries.length && !session.recorded) return; // an agent that only replies leaves the range empty; the round still ends here
   const foot = h('div', 'finish');
   if (session.recorded) foot.append(h('p', null, session.recorded));
   else {

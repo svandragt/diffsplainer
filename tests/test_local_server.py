@@ -177,6 +177,41 @@ def test_start_over_http_records_the_head_and_the_next_load_shows_only_new_commi
     assert data["review"]["reviews"][0]["head"] == local_repo.b
 
 
+def answered_with_replies_only(serve, repo):
+    """A question, sent to the agent, which replies and commits nothing: the range is empty and the question is open."""
+    chunk = {"sha": repo.a, "file": "a.py", "lines": "11-12", "diff": "+added1", "quote": "added1", "body": "Why?"}
+    assert post(serve, {"action": "question", **chunk})[0] == 200
+    assert post(serve, {"action": "start", "head": repo.b})[0] == 200
+    assert send(serve, "GET", "/api/local")[1]["local"]["commits"] == []
+
+
+def test_a_round_answered_with_replies_only_can_be_ended_at_the_current_head_and_approves_nothing(serve, local_repo):
+    answered_with_replies_only(serve, local_repo)
+    assert post(serve, {"action": "status", "id": "r1", "status": "resolved"})[0] == 200
+    assert post(serve, {"action": "start", "head": local_repo.b, "approve": True})[0] == 200
+    got = review_file(local_repo)
+    assert [r["head"] for r in got["reviews"]] == [local_repo.b, local_repo.b]
+    assert got["approved"] == []
+
+
+def test_an_empty_range_takes_a_general_comment_at_the_current_head_and_no_other_commit(serve, local_repo):
+    answered_with_replies_only(serve, local_repo)
+    general = {"action": "change", "file": "", "lines": "", "diff": "", "body": "Split this up."}
+    assert post(serve, {**general, "sha": local_repo.a})[0] == 400
+    assert post(serve, {**general, "sha": local_repo.b})[0] == 200
+    assert post(serve, {"action": "start", "head": local_repo.a})[0] == 400
+    chunk = {"action": "change", "file": "a.py", "lines": "1", "diff": "+x", "body": "b"}
+    assert post(serve, {**chunk, "sha": local_repo.b})[0] == 400  # a chunk entry names a commit of the range
+    assert len(review_file(local_repo)["entries"]) == 2  # the question and the general comment
+
+
+def test_approving_an_empty_range_is_a_400_while_an_entry_is_open(serve, local_repo):
+    answered_with_replies_only(serve, local_repo)
+    status, data = post(serve, {"action": "start", "head": local_repo.b, "approve": True})
+    assert status == 400 and "open" in data["error"]
+    assert len(review_file(local_repo)["reviews"]) == 1
+
+
 def test_a_commit_outside_the_range_is_a_400_and_writes_nothing(serve, local_repo):
     assert post(serve, {"action": "start", "head": local_repo.base})[0] == 400
     assert post(serve, {"action": "start", "head": "--output=x", "approve": True})[0] == 400
