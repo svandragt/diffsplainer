@@ -565,9 +565,9 @@ function renderEntry(e) {
   return div;
 }
 
-// What a request about a chunk carries: its commit, file, a line-range hint (new side, else old side) and the diff as text.
+// What a request about a chunk carries: its commit, file, a line-range hint (new side with added lines, else old side) and the diff as text.
 function chunkRef({ c, file }) {
-  const side = c.lines.some((l) => l.n != null) ? 'n' : 'o';
+  const side = c.lines.some((l) => l.t === 'add') ? 'n' : 'o'; // context lines have both numbers, so they cannot pick the side
   const nums = c.lines.map((l) => l[side]).filter((n) => n != null);
   const range = nums[0] === nums.at(-1) ? `${nums[0]}` : `${nums[0]}-${nums.at(-1)}`;
   return { sha: c.sha, file, lines: side === 'n' ? range : `old ${range}`, diff: c.lines.map((l) => mark(l.t) + l.s).join('\n') };
