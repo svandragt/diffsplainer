@@ -407,7 +407,8 @@ function renderAbout(info, count) {
 }
 
 function renderLocal({ local: info, files, review }, recorded) {
-  session = { info, review, chunks: new Map(), recorded, draft: '' }; // draft: the general comment typed and not yet sent
+  // draft: the general comment typed and not yet sent; recorded: only for the empty range it was shown for, because new commits need the controls
+  session = { info, review, chunks: new Map(), recorded: info.commits.length ? '' : recorded, draft: '' };
   files.forEach((f) => f.chunks.forEach((c) => session.chunks.set(c.id, { file: f.filename, c })));
   const n = info.commits.length;
   const sum = (key) => files.reduce((t, f) => t + f[key], 0);
