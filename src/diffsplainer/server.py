@@ -161,6 +161,11 @@ def parse_pr_limit(query: dict) -> int:
     return max(0, min(MAX_PRS, prs))
 
 
+def prompt_digest(*parts) -> str:
+    """A short hash of what a prompt holds besides the commits, for a cache key: an edit to any of it needs new answers."""
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def page_range(query: dict) -> tuple[str, str]:
     """The `base` and `head` the page sent, which must still be a range of the branch (a ValueError tells it to reload)."""
     return local.pinned_range(LOCAL_REPO, query.get("base", [""])[0], query.get("head", [""])[0])
@@ -319,8 +324,9 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             return self.send_json(400, {"error": str(e)})
 
-        def key(data):
-            return f"local:{LOCAL_REPO}", data["local"]["base"], data["local"]["head"]
+        def key(data):  # the term prompt has the summary but no plan
+            info = data["local"]
+            return f"local:{LOCAL_REPO}", info["base"], info["head"], prompt_digest(info["summary"])
 
         self.answer_term(query, lambda: local.load(LOCAL_REPO, base, head), "local", key)
 
@@ -460,8 +466,7 @@ class Handler(BaseHTTPRequestHandler):
             return send("done", {})
         plan = local_plan(LOCAL_REPO, info["branch"], info["summary"])
         # The summary and the plan are in the prompt, so an edit to either needs new explanations.
-        digest = hashlib.sha256(json.dumps([info["summary"], plan], sort_keys=True).encode()).hexdigest()[:12]
-        key = f"local:{LOCAL_REPO}@{info['base']}..{info['head']}:{pr_limit}:{digest}"
+        key = f"local:{LOCAL_REPO}@{info['base']}..{info['head']}:{pr_limit}:{prompt_digest(info['summary'], plan)}"
 
         def context():
             paths = [f["filename"] for f in files]

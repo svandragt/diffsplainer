@@ -699,6 +699,17 @@ def test_a_term_of_a_range_that_is_no_longer_the_pages_is_a_400_without_a_claude
     assert not term.calls
 
 
+def test_a_changed_summary_gets_a_new_term_answer(term, local_repo):
+    term.get(text="t")
+    term.get(text="t")
+    assert len(term.calls) == 1  # the same summary: from the cache
+    write_file(local_repo, summary={"title": "Cache feeds", "ticket": None, "body": None})
+    term.get(text="t")
+    assert len(term.calls) == 2  # the summary is in the term prompt
+    term.get(text="t")
+    assert len(term.calls) == 2
+
+
 @pytest.mark.parametrize(
     "params, status",
     [
