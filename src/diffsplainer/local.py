@@ -104,7 +104,7 @@ def list_commits(repo: Path, base: str, head: str) -> list[dict]:
 
 def diff_files(repo: Path, base: str, head: str) -> list[dict]:
     """The combined diff as GitHub-style file dicts (`patch`, `status`, ...), in the order of the Files changed tab."""
-    args = ["diff", "-M", "--no-color", "--no-ext-diff", "-U3"]
+    args = ["diff", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "-U3"]
     tokens = git(repo, *args, "--name-status", "-z", base, head).split("\0")[:-1]
     patches = iter(("\n" + git(repo, *args, base, head)).split("\ndiff --git ")[1:])  # same order as the names
     files, i = [], 0
@@ -132,7 +132,7 @@ def diff_files(repo: Path, base: str, head: str) -> list[dict]:
 
 def blame(repo: Path, rev_range: str, path: str, *flags: str) -> dict[int, str]:
     """Line number -> sha for one file, or {} when git cannot blame it (a submodule, for one)."""
-    r = run(repo, "blame", "--porcelain", *flags, rev_range, "--", path)
+    r = run(repo, "blame", "--porcelain", "--no-textconv", *flags, rev_range, "--", path)
     return {int(n): sha for sha, n in BLAME_RE.findall(r.stdout)} if r.returncode == 0 else {}
 
 

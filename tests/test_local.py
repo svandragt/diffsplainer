@@ -320,3 +320,20 @@ def test_load_marks_the_lockfiles_and_the_files_marked_generated_and_changes_not
         "uv.lock": True,
     }
     assert repo.state() == before
+
+
+@pytest.mark.parametrize("call", ["diff", "blame"])
+def test_a_textconv_filter_from_the_attributes_never_runs(repo, tmp_path, call):
+    marker = tmp_path / "ran"
+    filt = tmp_path / "filter.sh"
+    filt.write_text(f'#!/bin/sh\ntouch {marker}\ncat "$1"\n')
+    filt.chmod(0o755)
+    repo.git("config", "diff.evil.textconv", str(filt))
+    (repo.path / ".gitattributes").write_text("*.bin diff=evil\n")
+    (repo.path / "x.bin").write_text("one\ntwo\n")
+    repo.commit("Add a file with a textconv filter")
+    if call == "diff":
+        local.diff_files(repo.path, repo.base, "HEAD")
+    else:
+        local.blame(repo.path, f"{repo.base}..HEAD", "x.bin")
+    assert not marker.exists()
