@@ -70,6 +70,8 @@ Before you start the server, write `summary` into the review file, so the page a
 
 Write it like a reply: read the file, change only `summary`, write a temporary file in the same directory and rename it over `review.json`. If the file does not exist, create the `diffsplainer` directory in the git directory and the file as `{"reviews":[],"approved":[],"entries":[],"summary":{...}}`. Update the summary when a later round changes the scope. Claude also reads the plan for the branch: the file `plan` names, else `approach/<branch>.md` in the git directory, when there is one. The person sees the summary checked against the plan and the diff, so write what the commits do, not what you intended.
 
+Then check that the plan exists: the file `plan` names, else `approach/<branch>.md`, else `approach/<ticket key>.md` when the branch name starts with a ticket key such as `BH-740` or `1234`. If none of these is an existing file, tell the person "No plan found; looked at <the paths you checked>" and start the review anyway. Not every branch has a plan. A symlink in `approach/` to a file outside it does not count, so for a plan in another repo set `plan`.
+
 ```sh
 gd="$(git rev-parse --absolute-git-dir)"; mkdir -p "$gd/diffsplainer"
 if command -v diffsplainer >/dev/null; then app=diffsplainer; else app="uvx diffsplainer"; fi
