@@ -17,7 +17,12 @@ from pathlib import Path
 
 SHA_RE = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")  # SHA-1 or SHA-256
 STATUSES = ("open", "resolved")
-SUMMARY_FIELDS = {"title": 200, "ticket": 200, "body": 3000}  # field -> max chars: it goes into every prompt
+SUMMARY_FIELDS = {
+    "title": 200,
+    "ticket": 200,
+    "body": 3000,
+    "plan": 1000,
+}  # field -> max chars: it goes into every prompt
 _ENTRY_FIELDS = ("file", "lines", "diff", "body")
 _lock = threading.Lock()
 
@@ -72,13 +77,14 @@ def last_head(data: dict) -> str | None:
 
 
 def summary(data: dict) -> dict | None:
-    """The agent's `summary` (`title`, `ticket`, `body`): each field a non-blank string or None, or None as a whole when
-    nothing usable is there. The agent writes it and Diffsplainer never does, so no other type is trusted."""
+    """The agent's `summary` (`title`, `ticket`, `body` and `plan`, a path): each field a non-blank string or None, or
+    None as a whole when nothing usable is there. A `plan` alone is not usable: the page and the prompt would show a
+    summary with no text to check. The agent writes it and Diffsplainer never does, so no other type is trusted."""
     raw = data.get("summary")
     if not isinstance(raw, dict):
         return None
     got = {k: v.strip()[:n] or None if isinstance(v := raw.get(k), str) else None for k, n in SUMMARY_FIELDS.items()}
-    return got if any(got.values()) else None
+    return got if any(v for k, v in got.items() if k != "plan") else None
 
 
 def update(repo: Path, change, attempts: int = 5) -> dict:

@@ -447,7 +447,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         if not files:
             return send("done", {})
-        plan = local_plan(LOCAL_REPO, info["branch"])
+        plan = local_plan(LOCAL_REPO, info["branch"], info["summary"])
         # The summary and the plan are in the prompt, so an edit to either needs new explanations.
         digest = hashlib.sha256(json.dumps([info["summary"], plan], sort_keys=True).encode()).hexdigest()[:12]
         key = f"local:{LOCAL_REPO}@{info['base']}..{info['head']}:{pr_limit}:{digest}"

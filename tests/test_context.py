@@ -248,3 +248,92 @@ def test_local_plan_is_found_from_a_linked_worktree(repo, tmp_path):
     approach.mkdir()
     (approach / "wt.md").write_text("In the worktree's git dir.")
     assert context.local_plan(tmp_path / "wt", "wt")["body"] == "In the worktree's git dir."
+
+
+def _shared_plan(tmp_path, text="Shared plan.", name="plan.md"):
+    (tmp_path / "shared").mkdir(exist_ok=True)
+    (tmp_path / "shared" / name).write_text(text)
+    return tmp_path / "shared" / name
+
+
+def test_local_plan_is_the_file_the_summary_names_before_the_branch_file(repo, tmp_path):
+    _plans(repo, {"main.md": "Branch plan."})
+    file = _shared_plan(tmp_path)
+    assert context.local_plan(repo.path, "main", {"plan": str(file)}) == {"name": "plan.md", "body": "Shared plan."}
+
+
+def test_local_plan_expands_a_tilde_in_the_summarys_plan(repo, tmp_path, monkeypatch):
+    _shared_plan(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert context.local_plan(repo.path, "main", {"plan": "~/shared/plan.md"})["body"] == "Shared plan."
+
+
+def test_local_plan_reads_a_relative_plan_path_from_the_work_tree_not_the_current_directory(
+    repo, tmp_path, monkeypatch
+):
+    (repo.path / "docs").mkdir()
+    (repo.path / "docs" / "plan.md").write_text("In the repo.")
+    monkeypatch.chdir(tmp_path)
+    assert context.local_plan(repo.path, "main", {"plan": "docs/plan.md"})["body"] == "In the repo."
+
+
+def test_local_plan_names_the_summarys_plan_when_the_branch_is_detached(repo, tmp_path):
+    file = _shared_plan(tmp_path)
+    assert context.local_plan(repo.path, "HEAD", {"plan": str(file)})["name"] == "plan.md"
+
+
+def test_local_plan_clips_the_summarys_plan(repo, tmp_path):
+    file = _shared_plan(tmp_path, "x" * (context.MAX_PLAN_CHARS + 10))
+    assert context.local_plan(repo.path, "main", {"plan": str(file)})["body"].endswith("…[truncated]")
+
+
+def test_local_plan_refuses_a_summary_plan_that_is_not_a_markdown_file_and_uses_the_branch_file(repo, tmp_path):
+    _plans(repo, {"main.md": "Branch plan."})
+    secret = _shared_plan(tmp_path, "SECRET", "notes.txt")
+    (tmp_path / "shared" / "link.md").symlink_to(secret)  # a .md name that points at a file that is not
+    for plan in (secret, tmp_path / "shared" / "link.md"):
+        assert context.local_plan(repo.path, "main", {"plan": str(plan)}) == {"name": "main.md", "body": "Branch plan."}
+
+
+@pytest.fixture
+def unreadable(tmp_path):
+    """Values of `summary.plan` that name no readable plan."""
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "bin.md").write_bytes(b"\xff\xfe\x00")
+    (shared / "empty.md").write_text("  \n")
+    (shared / "dir.md").mkdir()
+    return {
+        "missing": str(shared / "missing.md"),
+        "binary": str(shared / "bin.md"),
+        "empty": str(shared / "empty.md"),
+        "directory": str(shared / "dir.md"),
+        "null byte": "a\0b.md",
+        "unknown user": "~nosuchuser/plan.md",
+        "blank": "",
+    }
+
+
+@pytest.mark.parametrize("case", ["missing", "binary", "empty", "directory", "null byte", "unknown user", "blank"])
+def test_local_plan_falls_back_to_the_branch_file_when_the_summarys_plan_cannot_be_read(repo, unreadable, case):
+    _plans(repo, {"main.md": "Branch plan."})
+    assert context.local_plan(repo.path, "main", {"plan": unreadable[case]}) == {
+        "name": "main.md",
+        "body": "Branch plan.",
+    }
+
+
+@pytest.mark.parametrize("plan", [None, 12, ["/p.md"], {"a": 1}, True])
+def test_local_plan_ignores_a_summary_plan_that_is_not_a_string(repo, plan):
+    _plans(repo, {"main.md": "Branch plan."})
+    assert context.local_plan(repo.path, "main", {"plan": plan})["name"] == "main.md"
+    assert context.local_plan(repo.path, "main", {"title": "T"})["name"] == "main.md"
+
+
+def test_local_plan_keeps_refusing_an_approach_symlink_that_leaves_the_directory_after_a_bad_summary_plan(
+    repo, tmp_path
+):
+    _plans(repo, {"x.md": "n"})
+    (tmp_path / "outside.md").write_text("SECRET")
+    (repo.path / ".git" / "approach" / "main.md").symlink_to(tmp_path / "outside.md")
+    assert context.local_plan(repo.path, "main", {"plan": str(tmp_path / "missing.md")}) is None

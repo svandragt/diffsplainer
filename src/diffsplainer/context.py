@@ -85,11 +85,31 @@ def local_instructions(repo: Path, changed: list[str]) -> list[dict]:
     return _read_docs([*ROOT_DOCS, *nested, "README.md"], read)
 
 
-def local_plan(repo: Path, branch: str) -> dict | None:
-    """The plan for `branch` in the git directory's `approach/` folder, as `{name, body}` (body clipped), or None.
+def _plan_text(file: Path) -> str | None:
+    try:
+        text = file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return text if text.strip() else None
 
-    The file is `<branch>.md`, else `<ticket key>.md` when the branch starts with a ticket key. A `*.ticket.md` or
-    `*-pr.md` file is not a plan. A candidate whose real path is outside `approach/` is refused."""
+
+def _named_plan(repo: Path, path: str) -> dict | None:
+    """The plan at `path` (`~` expanded, relative to the work tree), if it is a readable `.md` file. The extension is
+    checked on the real path, so a `.md` symlink to another kind of file is refused."""
+    file = (repo / Path(path).expanduser()).resolve()
+    text = _plan_text(file) if file.suffix == ".md" and file.is_file() else None
+    return {"name": file.name, "body": clip(text, MAX_PLAN_CHARS)} if text else None
+
+
+def local_plan(repo: Path, branch: str, summary: dict | None = None) -> dict | None:
+    """The plan for `branch` as `{name, body}` (body clipped), or None.
+
+    The file `summary["plan"]` names comes first. Otherwise it is in the git directory's `approach/` folder: `<branch>.md`,
+    else `<ticket key>.md` when the branch starts with a ticket key. A `*.ticket.md` or `*-pr.md` file is not a plan. A
+    candidate whose real path is outside `approach/` is refused."""
+    named = (summary or {}).get("plan")
+    if isinstance(named, str) and (plan := _safe(_named_plan, repo, named)):
+        return plan
     if branch == "HEAD":  # detached: `load` reports it so, and git refuses a branch with that name
         return None
     approach = (Path(local.git(repo, "rev-parse", "--absolute-git-dir").strip()) / "approach").resolve()
@@ -98,11 +118,7 @@ def local_plan(repo: Path, branch: str) -> dict | None:
         file = (approach / f"{name}.md").resolve()
         if name.endswith(("-pr", ".ticket")) or not file.is_relative_to(approach) or not file.is_file():
             continue
-        try:
-            text = file.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        if text.strip():
+        if text := _plan_text(file):
             return {"name": f"{name}.md", "body": clip(text, MAX_PLAN_CHARS)}
     return None
 

@@ -267,7 +267,7 @@ def test_load_names_the_repository_directory_and_returns_the_agents_summary(repo
     summary = {"title": "Cache feeds", "ticket": "BH-1", "body": "Why."}
     write_review(repo, summary=summary)
     info = local.load(repo.path)["local"]
-    assert (info["repo"], info["summary"]) == ("work", summary)
+    assert (info["repo"], info["summary"]) == ("work", {**summary, "plan": None})
 
 
 @pytest.mark.parametrize("summary", [None, "text", [1], {"title": 3}])

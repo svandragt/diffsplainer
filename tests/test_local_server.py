@@ -65,7 +65,7 @@ def test_api_local_returns_the_repository_name_and_the_agents_summary(serve, loc
     write_file(local_repo, summary=summary)
     status, data = send(serve, "GET", "/api/local")
     assert status == 200
-    assert (data["local"]["repo"], data["local"]["summary"]) == ("work", summary)
+    assert (data["local"]["repo"], data["local"]["summary"]) == ("work", {**summary, "plan": None})
 
 
 def test_api_local_returns_no_summary_for_a_malformed_one_and_does_not_fail(serve, local_repo):
@@ -315,7 +315,7 @@ def test_explaining_local_commits_gives_claude_the_summary_and_the_plan_and_tell
     assert context_event(events)["plan"] == "main.md"
     assert "Plan body." not in json.dumps(events)  # the page gets the name, not the text
     ctx, _ = fake_claude.files[0]
-    assert ctx["local"]["summary"] == summary
+    assert ctx["local"]["summary"] == {**summary, "plan": None}
     assert ctx["plan"] == {"name": "main.md", "body": "Plan body."}
     assert fake_claude.overviews[0]["plan"] == ctx["plan"]
 
@@ -333,6 +333,24 @@ def test_the_overview_event_carries_the_checks_and_a_cached_stream_replays_them(
         overviews = [d for e, d in explain_events(serve) if e == "overview"]
         assert [o["checks"] for o in overviews] == [checks]
     assert len(fake_claude.files) == 4  # the second stream came from the cache
+
+
+def test_a_plan_named_in_the_summary_is_given_to_claude_and_named_to_the_page_by_its_file_name(
+    serve, local_repo, fake_claude, tmp_path
+):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "feed-cache.md").write_text("Shared plan.")
+    approach = local_repo.path / ".git" / "approach"
+    approach.mkdir()
+    (approach / "main.md").write_text("Branch plan.")
+    write_file(local_repo, summary={"title": "Cache feeds", "plan": str(shared / "feed-cache.md")})
+    events = explain_events(serve)
+    assert context_event(events)["plan"] == "feed-cache.md"
+    assert fake_claude.files[0][0]["plan"] == {"name": "feed-cache.md", "body": "Shared plan."}
+    (shared / "feed-cache.md").write_text("Edited plan.")
+    explain_events(serve)
+    assert len(fake_claude.files) == 4 + 4  # the plan file's text is in the cache key
 
 
 def test_a_changed_summary_or_plan_gets_new_explanations(serve, local_repo, fake_claude):

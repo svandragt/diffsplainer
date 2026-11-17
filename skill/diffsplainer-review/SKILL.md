@@ -19,7 +19,7 @@ If the file does not exist, there are no comments.
 {
   "reviews": [{"head": "<sha>", "at": "<ISO time>"}],
   "approved": ["<commit sha>"],
-  "summary": {"title": "<what the commits do>", "ticket": "<key or URL, or null>", "body": "<the goal and the approach>"},
+  "summary": {"title": "<what the commits do>", "ticket": "<key or URL, or null>", "body": "<the goal and the approach>", "plan": "<absolute path to the plan, or null>"},
   "entries": [
     {
       "id": "r1",
@@ -44,6 +44,7 @@ If the file does not exist, there are no comments.
 - `lines` is a hint that goes out of date after the first fixup. Find the place by matching `diff`.
 - `reply` is `null` until you answer.
 - `summary` is yours, and it is optional. The page shows it at the top, and Claude reads it as the description of the work. Each field is a string or `null`.
+- `summary.plan` is optional: the absolute path to the plan, a `.md` file, when the plan is not `approach/<branch>.md` in this repo's git directory (a plan shared with another repo, for example). Diffsplainer reads it before `approach/<branch>.md`, and uses the branch file when `plan` is not an existing, readable `.md` file. It counts only next to a `title`, `ticket` or `body`.
 - `reviews` lists the HEAD of each review round. `approved` lists approved commits. Diffsplainer fills it only when the person clicks "Approve all and finish", which adds every commit of that round at once and is possible only when no entry is open.
 
 ## Protocol
@@ -64,8 +65,9 @@ Before you start the server, write `summary` into the review file, so the page a
 - `title` is what the commits do, worded as a PR title.
 - `ticket` is the ticket or issue key or URL, or `null`.
 - `body` is two to five sentences: the goal, the approach, and anything the reviewer should check.
+- `plan` is the absolute path to the plan when it is not `approach/<branch>.md` in this repo's git directory, else leave it out.
 
-Write it like a reply: read the file, change only `summary`, write a temporary file in the same directory and rename it over `review.json`. If the file does not exist, create the `diffsplainer` directory in the git directory and the file as `{"reviews":[],"approved":[],"entries":[],"summary":{...}}`. Update the summary when a later round changes the scope. Claude also reads the plan for the branch, `approach/<branch>.md` in the git directory, when there is one. The person sees the summary checked against the plan and the diff, so write what the commits do, not what you intended.
+Write it like a reply: read the file, change only `summary`, write a temporary file in the same directory and rename it over `review.json`. If the file does not exist, create the `diffsplainer` directory in the git directory and the file as `{"reviews":[],"approved":[],"entries":[],"summary":{...}}`. Update the summary when a later round changes the scope. Claude also reads the plan for the branch: the file `plan` names, else `approach/<branch>.md` in the git directory, when there is one. The person sees the summary checked against the plan and the diff, so write what the commits do, not what you intended.
 
 ```sh
 gd="$(git rev-parse --absolute-git-dir)"; mkdir -p "$gd/diffsplainer"

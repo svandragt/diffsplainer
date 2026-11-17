@@ -279,18 +279,30 @@ def test_a_file_that_keeps_changing_is_a_review_error_and_keeps_the_agents_write
 
 
 def test_summary_returns_the_string_fields_the_agent_wrote():
-    given = {"title": "Cache feeds", "ticket": "BH-1", "body": "Why.\nHow."}
+    given = {"title": "Cache feeds", "ticket": "BH-1", "body": "Why.\nHow.", "plan": "/shared/plan.md"}
     assert review.summary({"summary": given}) == given
+    assert review.summary({"summary": {"title": "T"}}) == {"title": "T", "ticket": None, "body": None, "plan": None}
+
+
+def test_summary_with_only_a_plan_path_is_none_because_it_has_nothing_to_show_or_check():
+    assert review.summary({"summary": {"plan": "/shared/plan.md"}}) is None
 
 
 def test_summary_ignores_a_field_that_is_not_a_string_and_blank_text():
     got = review.summary({"summary": {"title": "T", "ticket": 12, "body": "  "}})
-    assert got == {"title": "T", "ticket": None, "body": None}
+    assert got == {"title": "T", "ticket": None, "body": None, "plan": None}
+
+
+def test_summary_ignores_a_plan_that_is_not_a_string():
+    assert review.summary({"summary": {"title": "T", "plan": ["/p.md"]}})["plan"] is None
 
 
 def test_summary_clips_long_fields_because_they_go_into_every_prompt():
-    got = review.summary({"summary": {"title": "t" * 1000, "ticket": "k" * 1000, "body": "b" * 10000}})
+    got = review.summary(
+        {"summary": {"title": "t" * 1000, "ticket": "k" * 1000, "body": "b" * 10000, "plan": "p" * 5000}}
+    )
     assert len(got["title"]) <= 200 and len(got["ticket"]) <= 200 and len(got["body"]) <= 3000
+    assert len(got["plan"]) <= 1000
 
 
 @pytest.mark.parametrize(
