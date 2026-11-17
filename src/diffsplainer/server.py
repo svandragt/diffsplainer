@@ -161,6 +161,11 @@ def parse_pr_limit(query: dict) -> int:
     return max(0, min(MAX_PRS, prs))
 
 
+def page_range(query: dict) -> tuple[str, str]:
+    """The `base` and `head` the page sent, which must still be a range of the branch (a ValueError tells it to reload)."""
+    return local.pinned_range(LOCAL_REPO, query.get("base", [""])[0], query.get("head", [""])[0])
+
+
 class ClientGone(Exception):
     pass
 
@@ -216,8 +221,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.api_local_explain_term(parse_qs(url.query))
             if path == "/api/local":
                 return self.api_local()
-            limit = parse_pr_limit(parse_qs(url.query))
-            return self.stream(lambda send, gone: self._explain_local(limit, send, gone))
+            return self.stream(lambda send, gone: self._explain_local(parse_qs(url.query), send, gone))
         if m := PR_RE.match(path):
             return self.api_pr(m[1], m[2], int(m[3]))
         if m := EXPLAIN_RE.match(path):
@@ -310,10 +314,15 @@ class Handler(BaseHTTPRequestHandler):
         self.answer_term(query, lambda: load_pr(owner, repo, num), "pr", head)
 
     def api_local_explain_term(self, query: dict):
-        def head(data):
+        try:
+            base, head = page_range(query)
+        except ValueError as e:
+            return self.send_json(400, {"error": str(e)})
+
+        def key(data):
             return f"local:{LOCAL_REPO}", data["local"]["base"], data["local"]["head"]
 
-        self.answer_term(query, lambda: local.load(LOCAL_REPO), "local", head)
+        self.answer_term(query, lambda: local.load(LOCAL_REPO, base, head), "local", key)
 
     def answer_term(self, query: dict, load, kind: str, head):
         """Explain one selected term. `load()` returns the PR or the local commits (`kind` is `pr` or `local`), and
@@ -433,8 +442,9 @@ class Handler(BaseHTTPRequestHandler):
 
         explain_changes(key, context, send, gone)
 
-    def _explain_local(self, pr_limit, send, gone):
-        data = local.load(LOCAL_REPO)
+    def _explain_local(self, query, send, gone):
+        pr_limit = parse_pr_limit(query)
+        data = local.load(LOCAL_REPO, *page_range(query))  # a ValueError reaches the page as an error event
         info, files = data["local"], data["files"]
         changed = sum(f["additions"] + f["deletions"] for f in files if not f["generated"])
         if changed > MAX_CHANGED_LINES:

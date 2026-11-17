@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from diffsplainer import context, server
+from diffsplainer import context, local, server
 from diffsplainer import github as gh
 
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin", "Content-Type": "application/json"}
@@ -343,8 +343,16 @@ def fake_claude(monkeypatch):
     return calls
 
 
-def explain_events(serve, query=""):
-    status, text = send(serve, "GET", "/api/local/explain" + query)
+def page_range(serve):
+    """The base and head the page sends: what `/api/local` reported when it loaded."""
+    info = send(serve, "GET", "/api/local")[1]["local"]
+    return {"base": info["base"], "head": info["head"]}
+
+
+def explain_events(serve, query="", **pinned):
+    """The stream for the range the page shows, or for `pinned` (`base` and `head`) instead."""
+    q = urllib.parse.urlencode({**page_range(serve), **pinned})
+    status, text = send(serve, "GET", f"/api/local/explain?{q}&{query.removeprefix('?')}")
     assert status == 200
     blocks = [b.split("\n", 1) for b in text.strip().split("\n\n")]
     return [(e.removeprefix("event: "), json.loads(d.removeprefix("data: "))) for e, d in blocks]
@@ -540,6 +548,45 @@ def test_a_new_commit_gets_new_explanations(serve, local_repo, fake_claude):
     assert len(fake_claude.files) == 4 + 5  # the first run explained 4 files, the second 5
 
 
+def stale_ranges(repo):
+    """Pairs of `base` and `head` that are not a range of the branch's history, or not shas at all."""
+    side = repo.git("commit-tree", "HEAD^{tree}", "-p", repo.base, "-m", "side")  # a commit on no branch
+    return [
+        {"base": repo.b, "head": repo.a},  # base after head
+        {"base": repo.base, "head": side},  # head is not in HEAD's history
+        {"base": side, "head": repo.b},  # base is not in head's history
+        {"base": repo.base, "head": repo.b[:7]},  # not a full sha
+        {"base": "--output=x", "head": repo.b},
+    ]
+
+
+def test_explaining_the_range_the_page_showed_uses_it_and_not_the_newer_head(serve, local_repo, fake_claude):
+    # the page showed base..a, and the agent has committed b since
+    events = explain_events(serve, base=local_repo.base, head=local_repo.a)
+    ctx, _ = fake_claude.files[0]
+    assert (ctx["local"]["base"], ctx["local"]["head"]) == (local_repo.base, local_repo.a)
+    assert [c["sha"] for c in ctx["local"]["commits"]] == [local_repo.a]
+    files = local.changes(local_repo.path, local_repo.base, local_repo.a)[1]
+    assert {p["id"] for e, p in events if e == "chunk"} == {c["id"] for f in files for c in f["chunks"]}
+
+
+def test_explaining_a_range_that_is_no_longer_the_pages_is_an_error_event_that_says_to_reload(
+    serve, local_repo, fake_claude
+):
+    for pinned in stale_ranges(local_repo):
+        ((event, payload),) = explain_events(serve, **pinned)
+        assert (event, payload["scope"]) == ("error", "fatal") and "Reload" in payload["message"]
+    ((event, payload),) = explain_events(serve, base="", head="")
+    assert event == "error" and "Reload" in payload["message"]
+    assert fake_claude.files == [] and fake_claude.overviews == []
+
+
+def test_the_pinned_range_gets_the_merge_base_of_its_own_head(serve, local_repo, fake_claude):
+    local_repo.git("push", "-q")  # GitHub now has b, so the merge-base of HEAD is b
+    explain_events(serve, base=local_repo.base, head=local_repo.a)
+    assert fake_claude.files[0][0]["local"]["merge_base"] == local_repo.a
+
+
 def test_an_empty_range_is_not_explained(serve, local_repo, fake_claude):
     local_repo.git("push", "-q")
     assert explain_events(serve) == [("done", {})]
@@ -606,7 +653,7 @@ def term(serve, local_repo, monkeypatch):
     monkeypatch.setattr(server, "explain_term", explain_term)
 
     def get(**params):
-        return send(serve, "GET", "/api/local/explain-term?" + urllib.parse.urlencode(params))
+        return send(serve, "GET", "/api/local/explain-term?" + urllib.parse.urlencode({**page_range(serve), **params}))
 
     return SimpleNamespace(calls=calls, get=get)
 
@@ -627,6 +674,29 @@ def test_a_local_term_answer_is_cached_until_the_head_changes(term, local_repo):
     local_repo.commit("More")
     term.get(text="t")
     assert len(term.calls) == 2
+
+
+def test_a_term_of_the_range_the_page_showed_is_explained_in_that_range(term, local_repo):
+    chunk = next(
+        c
+        for f in local.changes(local_repo.path, local_repo.base, local_repo.a)[1]
+        if f["filename"] == "b.py"
+        for c in f["chunks"]
+    )
+    pinned = {"base": local_repo.base, "head": local_repo.a}
+    assert term.get(text="t", chunk=chunk["id"], **pinned)[0] == 200
+    call = term.calls[0]
+    assert call.chunk == chunk and "THREE" not in json.dumps(call.chunk)  # b.py as `a` left it, not as `b` edited it
+    assert [c["sha"] for c in call.ctx["local"]["commits"]] == [local_repo.a]
+    term.get(text="t")
+    assert len(term.calls) == 2  # the newer range is another cache entry
+
+
+def test_a_term_of_a_range_that_is_no_longer_the_pages_is_a_400_without_a_claude_call(term, local_repo, serve):
+    for pinned in stale_ranges(local_repo):
+        assert term.get(text="t", **pinned)[0] == 400
+    assert send(serve, "GET", "/api/local/explain-term?text=t")[0] == 400  # no range at all
+    assert not term.calls
 
 
 @pytest.mark.parametrize(

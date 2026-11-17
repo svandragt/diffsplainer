@@ -58,25 +58,41 @@ def current_range(repo: Path) -> tuple[str, str]:
     return base, head
 
 
+def upstream_merge_base(repo: Path, tip: str = "HEAD") -> str:
+    """The last commit of `tip` that the remote has, from the upstream or else the default branch."""
+    for ref in ("@{upstream}", *DEFAULT_REFS):
+        r = run(repo, "merge-base", tip, ref)
+        if r.returncode == 0:
+            return r.stdout.strip()
+    raise ValueError("The branch has no upstream, and the repository has no default branch to compare it with")
+
+
 def ranges(repo: Path) -> tuple[str, str, str]:
     """The merge-base with the upstream, the base of the commits under review, and HEAD.
 
     The merge-base is the last commit that is on the remote, which the base is not once a review round has been
     recorded for an unpushed head."""
     head = git(repo, "rev-parse", "HEAD").strip()
-    for ref in ("@{upstream}", *DEFAULT_REFS):
-        r = run(repo, "merge-base", "HEAD", ref)
-        if r.returncode == 0:
-            merge_base = base = r.stdout.strip()
-            break
-    else:
-        raise ValueError("The branch has no upstream, and the repository has no default branch to compare it with")
+    merge_base = base = upstream_merge_base(repo)
     # The newest review round's head, if it is a commit of this range, is where the next round starts. The value is
     # from a file another program writes, so it must be a sha before it goes to git.
     reviewed = review.last_head(review.read(repo))
     if reviewed and is_ancestor(repo, base, reviewed) and is_ancestor(repo, reviewed, head):
         base = reviewed
     return merge_base, base, head
+
+
+def pinned_range(repo: Path, base: str, head: str) -> tuple[str, str]:
+    """The `base` and `head` a page showed, if they are still a range of this branch: full shas, `base` in the history of
+    `head`, and `head` in the history of HEAD. Anything else is a ValueError that tells the page to reload. The values
+    come from a query string, so only full shas go to git."""
+    if not (review.SHA_RE.fullmatch(base) and review.SHA_RE.fullmatch(head)):
+        raise ValueError(
+            "The request must name the base and head of the commits on the page as full shas. Reload the page."
+        )
+    if not (is_ancestor(repo, base, head) and is_ancestor(repo, head, "HEAD")):
+        raise ValueError("The commits changed since this page loaded. Reload the page.")
+    return base, head
 
 
 def list_commits(repo: Path, base: str, head: str) -> list[dict]:
@@ -165,10 +181,14 @@ def changes(repo: Path, base: str, head: str) -> tuple[list[dict], list[dict]]:
     return commits, files
 
 
-def load(repo: Path) -> dict:
+def load(repo: Path, base: str | None = None, head: str | None = None) -> dict:
     """The commits under review, their combined diff chunked and tagged with commits, and the review file. `summary` is
-    the agent's description of the work from that file, checked by `review.summary`."""
-    merge_base, base, head = ranges(repo)
+    the agent's description of the work from that file, checked by `review.summary`. `base` and `head`, checked by
+    `pinned_range`, are the range a page showed: chunk ids belong to one diff, so a later request must use the same."""
+    if base is None or head is None:
+        merge_base, base, head = ranges(repo)
+    else:
+        merge_base = upstream_merge_base(repo, head)
     commits, files = changes(repo, base, head)
     branch = git(repo, "branch", "--show-current").strip() or "HEAD"
     file = review.read(repo)

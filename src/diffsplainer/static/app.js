@@ -307,6 +307,7 @@ async function askTerm({ text, around, chunk }, a) {
   const ctl = (popAbort = new AbortController());
   const q = new URLSearchParams({ text, around });
   if (chunk) q.set('chunk', chunk);
+  if (session) for (const k of ['base', 'head']) q.set(k, session.info[k]); // the chunk id is in the range this page shows
   try {
     const pr = parsePr(location.pathname);
     const res = await fetch(`${pr ? `/api/explain-term/${pr.owner}/${pr.repo}/${pr.num}` : '/api/local/explain-term'}?${q}`, { signal: ctl.signal });
@@ -428,8 +429,10 @@ function renderLocal({ local: info, files, review }, recorded) {
   renderReview();
   if (!n) return;
   if (lazy) document.querySelectorAll('.diff[data-lang]').forEach((el) => lazy.observe(el));
+  const q = new URLSearchParams({ base: info.base, head: info.head }); // the range this page shows: chunk ids belong to it
   const prs = new URLSearchParams(location.search).get('prs');
-  explain(`/api/local/explain${prs === null ? '' : `?prs=${encodeURIComponent(prs)}`}`);
+  if (prs !== null) q.set('prs', prs);
+  explain(`/api/local/explain?${q}`);
 }
 
 // Sends one review request. The answer is the new review data, which redraws the commits and the panel.
