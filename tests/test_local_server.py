@@ -319,6 +319,21 @@ def test_explaining_local_commits_gives_claude_the_summary_and_the_plan_and_tell
     assert fake_claude.overviews[0]["plan"] == ctx["plan"]
 
 
+def test_the_overview_event_carries_the_checks_and_a_cached_stream_replays_them(
+    serve, local_repo, fake_claude, monkeypatch
+):
+    checks = ["Plan item 2 is not in the diff (a.py)."]
+    monkeypatch.setattr(
+        server,
+        "explain_overview",
+        lambda ctx, files, cancel=None: {"summary": "s", "approach": "a", "review_focus": [], "checks": checks},
+    )
+    for _ in range(2):
+        overviews = [d for e, d in explain_events(serve) if e == "overview"]
+        assert [o["checks"] for o in overviews] == [checks]
+    assert len(fake_claude.files) == 4  # the second stream came from the cache
+
+
 def test_a_changed_summary_or_plan_gets_new_explanations(serve, local_repo, fake_claude):
     explain_events(serve)
     explain_events(serve)

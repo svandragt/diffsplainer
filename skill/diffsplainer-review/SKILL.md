@@ -65,7 +65,7 @@ Before you start the server, write `summary` into the review file, so the page a
 - `ticket` is the ticket or issue key or URL, or `null`.
 - `body` is two to five sentences: the goal, the approach, and anything the reviewer should check.
 
-Write it like a reply: read the file, change only `summary`, write a temporary file in the same directory and rename it over `review.json`. If the file does not exist, create the `diffsplainer` directory in the git directory and the file as `{"reviews":[],"approved":[],"entries":[],"summary":{...}}`. Update the summary when a later round changes the scope. Claude also reads the plan for the branch, `approach/<branch>.md` in the git directory, when there is one.
+Write it like a reply: read the file, change only `summary`, write a temporary file in the same directory and rename it over `review.json`. If the file does not exist, create the `diffsplainer` directory in the git directory and the file as `{"reviews":[],"approved":[],"entries":[],"summary":{...}}`. Update the summary when a later round changes the scope. Claude also reads the plan for the branch, `approach/<branch>.md` in the git directory, when there is one. The person sees the summary checked against the plan and the diff, so write what the commits do, not what you intended.
 
 ```sh
 gd="$(git rev-parse --absolute-git-dir)"; mkdir -p "$gd/diffsplainer"

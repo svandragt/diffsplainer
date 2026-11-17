@@ -200,8 +200,10 @@ function explain(url) {
     }
   });
 
+  let hasPlan = false; // the checks in the overview are against the plan, or else against the agent's summary
   source.addEventListener('context', (e) => {
     const { instructions, related, plan } = JSON.parse(e.data);
+    hasPlan = !!plan;
     $('#context').innerHTML = `<h2>Context given to Claude</h2>
       <div><b>Project instructions:</b> ${instructions.length ? instructions.map((p) => `<code>${esc(p)}</code>`).join(' ') : 'none found'}</div>
       ${session ? `<div><b>Plan:</b> ${plan ? `<code>${esc(plan)}</code>` : 'none'}</div>` : ''}
@@ -212,7 +214,8 @@ function explain(url) {
   source.addEventListener('overview', (e) => {
     const o = JSON.parse(e.data);
     $('#overview').innerHTML = `<h2>Overview</h2><p>${md(o.summary)}</p><p>${md(o.approach)}</p>
-      ${o.review_focus?.length ? `<b>Review focus</b><ul>${o.review_focus.map((x) => `<li>${md(x)}</li>`).join('')}</ul>` : ''}`;
+      ${o.review_focus?.length ? `<b>Review focus</b><ul>${o.review_focus.map((x) => `<li>${md(x)}</li>`).join('')}</ul>` : ''}
+      ${Array.isArray(o.checks) ? `<b>${hasPlan ? 'Against the plan' : "Against the agent's summary"}</b>${o.checks.length ? `<ul>${o.checks.map((x) => `<li>${md(x)}</li>`).join('')}</ul>` : '<p class="none">No mismatches found.</p>'}` : ''}`;
   });
 
   source.addEventListener('chunk', (e) => {
@@ -393,7 +396,7 @@ function renderAbout(info, count) {
   }
   const where = h('div', 'meta where');
   where.append(h('code', null, info.repo), h('code', null, info.branch));
-  return [where, h('h1', null, s.title ?? count), s.ticket && h('div', 'meta', s.ticket), s.body && h('p', 'summary-body', s.body)].filter(Boolean);
+  return [where, h('div', 'lbl', "Agent's summary"), h('h1', null, s.title ?? count), s.ticket && h('div', 'meta', s.ticket), s.body && h('p', 'summary-body', s.body)].filter(Boolean);
 }
 
 function renderLocal({ local: info, files, review }, recorded) {
