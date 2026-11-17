@@ -152,6 +152,21 @@ def test_request_changes_and_a_comment_over_http_add_entries(serve, local_repo):
     ]
 
 
+def test_a_general_comment_over_http_is_added_with_no_file_and_its_sha_must_be_in_the_range(serve, local_repo):
+    general = {"action": "change", "file": "", "lines": "", "diff": "", "body": "Split this up."}
+    assert post(serve, {**general, "sha": "f" * 40})[0] == 400
+    assert review_file(local_repo) is None
+    assert post(serve, {**general, "sha": local_repo.b})[0] == 200
+    (got,) = review_file(local_repo)["entries"]
+    assert (got["sha"], got["file"], got["lines"], got["diff"], got["body"]) == (
+        local_repo.b,
+        "",
+        "",
+        "",
+        "Split this up.",
+    )
+
+
 def test_start_over_http_records_the_head_and_the_next_load_shows_only_new_commits(serve, local_repo):
     assert post(serve, {"action": "start", "head": local_repo.b})[0] == 200
     local_repo.dirty()

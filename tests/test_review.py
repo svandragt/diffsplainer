@@ -113,6 +113,27 @@ def test_a_comment_adds_an_open_question_with_the_selected_text(repo):
     assert (got["kind"], got["status"], got["quote"], got["body"]) == ("question", "open", "added1", "What is this?")
 
 
+def test_a_general_comment_is_an_open_change_entry_with_no_file_lines_or_diff(repo):
+    entry(repo, sha=repo.b, file="", lines="", diff="", body="Split this into two PRs.")
+    got = read(repo)["entries"][0]
+    assert (got["kind"], got["status"], got["sha"], got["file"], got["lines"], got["diff"], got["body"]) == (
+        "change",
+        "open",
+        repo.b,
+        "",
+        "",
+        "",
+        "Split this into two PRs.",
+    )
+
+
+def test_a_general_comment_still_needs_a_commit_of_the_range_and_a_body(repo):
+    for over in ({"sha": "f" * 40}, {"sha": None}, {"body": " "}):
+        with pytest.raises(ValueError):
+            entry(repo, file="", lines="", diff="", **over)
+    assert not review.path(repo.path).exists()
+
+
 def test_entry_ids_count_up_and_skip_ids_that_exist(repo):
     entry(repo)
     entry(repo)

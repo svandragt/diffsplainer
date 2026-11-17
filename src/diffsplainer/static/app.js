@@ -406,7 +406,7 @@ function renderAbout(info, count) {
 }
 
 function renderLocal({ local: info, files, review }, recorded) {
-  session = { info, review, chunks: new Map(), recorded };
+  session = { info, review, chunks: new Map(), recorded, draft: '' }; // draft: the general comment typed and not yet sent
   files.forEach((f) => f.chunks.forEach((c) => session.chunks.set(c.id, { file: f.filename, c })));
   const n = info.commits.length;
   const sum = (key) => files.reduce((t, f) => t + f[key], 0);
@@ -499,15 +499,38 @@ function renderReview() {
   const foot = h('div', 'finish');
   if (session.recorded) foot.append(h('p', null, session.recorded));
   else {
-    // One button ends the round: with open entries it hands them to the agent, with none it approves every commit.
-    const approve = !open.length;
-    const btn = button(approve ? 'Approve all and finish' : `Send ${plural(open.length, 'comment')} to agent`, 'primary');
+    // One button ends the round: with open entries or a general comment it hands them to the agent, with none it approves every commit.
+    const label = h('label', 'lbl', 'General comment');
+    const text = Object.assign(h('textarea'), { id: 'general', rows: 3, value: session.draft });
+    label.htmlFor = text.id;
+    const general = h('div', 'general');
+    general.append(label, text);
+    box.append(general);
+    const btn = button('', 'primary');
     const err = h('span', 'err');
+    const count = () => open.length + (text.value.trim() ? 1 : 0);
+    const sync = () => {
+      session.draft = text.value; // the entry list redraws this panel and would drop what is typed
+      btn.textContent = count() ? `Send ${plural(count(), 'comment')} to agent` : 'Approve all and finish';
+    };
+    text.addEventListener('input', sync);
+    sync();
     btn.title = 'Records this HEAD, so the next run shows only commits after it';
     btn.addEventListener('click', async () => {
       btn.disabled = true;
+      const approve = !count();
+      const note = text.value.trim() ? text.value : '';
       const recorded = `${approve ? 'Approved' : 'Sent to the agent'}. The next run shows only new commits.`;
-      await act({ action: 'start', head: info.head, ...(approve && { approve }) }, err, () => reloadLocal(recorded));
+      if (note) {
+        session.draft = ''; // the redraw after the post shows the entry, not the draft
+        try { await postReview({ action: 'change', sha: info.head, file: '', lines: '', diff: '', body: note }); } catch (e) {
+          session.draft = note;
+          err.textContent = e.message;
+          btn.disabled = false;
+          return;
+        }
+      }
+      await act({ action: 'start', head: info.head, ...(approve && { approve }) }, $('.finish .err', box), () => reloadLocal(recorded));
       btn.disabled = false;
     });
     foot.append(btn, err);
@@ -519,7 +542,7 @@ function renderEntry(e) {
   const done = e.status === 'resolved';
   const div = h('div', 'entry');
   const head = h('div', 'entry-head');
-  head.append(h('b', null, e.kind === 'question' ? 'Question' : 'Change request'), h('code', null, `${e.file ?? ''}:${e.lines ?? ''}`),
+  head.append(h('b', null, e.kind === 'question' ? 'Question' : 'Change request'), e.file ? h('code', null, `${e.file}:${e.lines ?? ''}`) : h('span', null, 'General comment'),
     h('code', 'sha', String(e.sha ?? '').slice(0, 7)), h('span', `pill ${done ? 'draft' : 'merged'}`, done ? 'resolved' : 'open'));
   div.append(head);
   if (e.quote) div.append(h('blockquote', 'quote', e.quote));

@@ -5,7 +5,7 @@ description: Start Diffsplainer so a person can review your unpushed commits, th
 
 # Answer Diffsplainer review comments
 
-A person reviews your unpushed commits with `diffsplainer --local`. They request changes on a chunk or ask a question about selected text, then send the comments to you or approve all the commits. Diffsplainer writes these to a JSON file in the repo's git directory. You start Diffsplainer for the person, answer each open entry with a fixup commit or a reply, then wait for the next review.
+A person reviews your unpushed commits with `diffsplainer --local`. They request changes on a chunk, ask a question about selected text or write a general comment, then send the comments to you or approve all the commits. Diffsplainer writes these to a JSON file in the repo's git directory. You start Diffsplainer for the person, answer each open entry with a fixup commit or a reply, then wait for the next review.
 
 ## Find the review file
 
@@ -41,6 +41,7 @@ If the file does not exist, there are no comments.
 - `kind` is `change` (a change request) or `question`. A question has the selected text in `quote`.
 - `status` is `open` or `resolved`.
 - `sha` is the commit the entry is about.
+- An entry with an empty `file` (and an empty `lines` and `diff`) is a general comment on the work as a whole, not on one chunk. Its `sha` is the newest commit of the range at that time, not the commit the comment concerns.
 - `lines` is a hint that goes out of date after the first fixup. Find the place by matching `diff`.
 - `reply` is `null` until you answer.
 - `summary` is yours, and it is optional. The page shows it at the top, and Claude reads it as the description of the work. Each field is a string or `null`.
@@ -50,7 +51,7 @@ If the file does not exist, there are no comments.
 ## Protocol
 
 1. Read the file. The entries to answer have `status` `open` and `reply` `null`.
-2. For a `change` entry, make the change and commit it with `git commit --fixup <sha>`, using the entry's `sha`. Run the tests first. Set `reply` to one or two sentences on what you changed. If you decide not to change it, make no commit and say why in the reply.
+2. For a `change` entry, make the change and commit it with `git commit --fixup <sha>`, using the entry's `sha`. For a general comment, use the commit you judge the change belongs to, which is not necessarily the entry's `sha`. Run the tests first. Set `reply` to one or two sentences on what you changed. If you decide not to change it, make no commit and say why in the reply.
 3. For a `question` entry, set `reply` to the answer.
 4. Read the file again just before writing, because Diffsplainer may have added an entry or changed a status in the meantime. Change only `reply` on the entries you answered.
 5. Write the whole file to a temporary file in the same directory, then rename it over `review.json`.

@@ -75,7 +75,7 @@ details.generated:not([open]) > .file-head { border-radius: 8px; }
 .explain .inner { position: sticky; top: 100px; }
 .explain h3 { margin: 0 0 6px; font-size: 14px; }
 .explain p { margin: 0 0 8px; }
-.explain .lbl, .term-pop .lbl, .entry .lbl, .pr-head .lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-right: 4px; }
+.explain .lbl, .term-pop .lbl, .entry .lbl, .pr-head .lbl, .general .lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-right: 4px; }
 .explain .concern { background: var(--warn-bg); border-left: 3px solid var(--warn-border); padding: 6px 8px; border-radius: 4px; }
 .explain .err, .term-pop .err { color: var(--minus); font-size: 13px; }
 .skeleton { height: 10px; border-radius: 4px; margin: 8px 0; background: linear-gradient(90deg, var(--border), var(--bg), var(--border)); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
@@ -123,8 +123,10 @@ details.generated:not([open]) > .file-head { border-radius: 8px; }
 .chunk-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; user-select: none; }
 .sent { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
 .body-form { margin-top: 8px; }
-.body-form textarea { display: block; width: 100%; padding: 6px 8px; font: inherit; border: 1px solid var(--border); border-radius: 6px;
+.body-form textarea, .general textarea { display: block; width: 100%; padding: 6px 8px; font: inherit; border: 1px solid var(--border); border-radius: 6px;
   background: var(--bg); color: var(--text); resize: vertical; }
+.general { margin-top: 8px; }
+.general .lbl { display: block; margin-bottom: 4px; }
 .body-form .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
 
 .diff { overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 20px; }
