@@ -59,9 +59,16 @@ If the file does not exist, there are no comments.
 
 ## Start the review
 
-When you list your unpushed commits for the person's review, write the summary, start Diffsplainer yourself in the background, then start the wait below straight away. Do not ask the person to start it, and do not wait for them to say they have reviewed.
+When you list your unpushed commits for the person's review, record the review count, write the summary, start Diffsplainer yourself in the background, then start the wait below straight away. Do not ask the person to start it, and do not wait for them to say they have reviewed.
 
-Before you start the server, write `summary` into the review file, so the page and Claude say what the work is for:
+Before you write the summary or start the server, record how many items `reviews` has. The wait below compares against this number, so a round that the person ends before the wait starts is not missed:
+
+```sh
+gd="$(git rev-parse --absolute-git-dir)"; mkdir -p "$gd/diffsplainer"
+python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1])).get("reviews", [])))' "$gd/diffsplainer/review.json" >"$gd/diffsplainer/reviews.seen" 2>/dev/null || echo 0 >"$gd/diffsplainer/reviews.seen"
+```
+
+Then write `summary` into the review file, so the page and Claude say what the work is for:
 
 - `title` is what the commits do, worded as a PR title.
 - `ticket` is the ticket or issue key or URL, or `null`.
@@ -90,13 +97,14 @@ When the person approves, stop the server: `kill "$(cat "$gd/diffsplainer/server
 
 The person ends a round with one button, "Send N comments to agent" or "Approve all and finish", and Diffsplainer then adds an item to `reviews`. Nothing else tells you, so watch the file instead of waiting for the person to tell you. The same wait applies before the first review.
 
-Record how many items `reviews` has, then wait until it has more:
+Wait until `reviews` has more items than the number in `reviews.seen`, which you recorded before you started the server. When the wait returns, it writes its own count there, so a round that the person ends while you answer is not missed by the next wait:
 
 ```sh
-f="$(git rev-parse --absolute-git-dir)/diffsplainer/review.json"
+gd="$(git rev-parse --absolute-git-dir)"; f="$gd/diffsplainer/review.json"
 count() { python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1])).get("reviews", [])))' "$f" 2>/dev/null || echo -1; }
-n=$(count); [ "$n" -lt 0 ] && n=0
-until [ "$(count)" -gt "$n" ]; do sleep 20; done
+n=$(cat "$gd/diffsplainer/reviews.seen")
+until c=$(count); [ "$c" -gt "$n" ]; do sleep 20; done
+echo "$c" >"$gd/diffsplainer/reviews.seen"
 ```
 
 Run it with your harness's background wait, so you use nothing while you wait; in Claude Code, that is the Monitor tool. A file that is missing or mid-write counts as -1, so the wait continues. Comments the person adds before they end the round are part of that round: answer them after the wait returns, not as they appear.
