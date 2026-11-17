@@ -82,14 +82,21 @@ Then check that the plan exists: the file `plan` names, else `approach/<branch>.
 ```sh
 gd="$(git rev-parse --absolute-git-dir)"; mkdir -p "$gd/diffsplainer"
 if command -v diffsplainer >/dev/null; then app=diffsplainer; else app="uvx diffsplainer"; fi
+up() { curl -sf --max-time 1 -o /dev/null "http://localhost:$1/api/version"; }
 for port in $(seq 3000 3020); do
+  up $port && continue # a server already answers on this port
   PORT=$port nohup $app --local >"$gd/diffsplainer/server.log" 2>&1 &
-  sleep 3
-  if kill -0 $! 2>/dev/null; then echo $! >"$gd/diffsplainer/server.pid"; echo "http://localhost:$port"; break; fi
+  pid=$!
+  for _ in $(seq 40); do # up to 20 s: the first uvx run installs the package
+    up $port && { echo $pid >"$gd/diffsplainer/server.pid"; echo "http://localhost:$port"; break 2; }
+    kill -0 $pid 2>/dev/null || break # the process exited, so the port is busy
+    sleep 0.5
+  done
+  kill $pid 2>/dev/null
 done
 ```
 
-The app opens the page in the browser. Give the person the URL as well. A port that another app uses makes the start fail, so the loop tries the next one. If no port works, show the person the end of `server.log`.
+The app opens the page in the browser. Give the person the URL as well. The loop waits up to 20 seconds for each start to answer on its port. A port that another app uses makes the start fail, or already answers, so the loop tries the next one. If no port works, show the person the end of `server.log`.
 
 When the person approves, stop the server: `kill "$(cat "$gd/diffsplainer/server.pid")"`.
 
