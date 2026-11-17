@@ -85,11 +85,21 @@ def tag(name: str, body: str) -> str:
     return f"<{name}>\n{body}\n</{name}>"
 
 
-def local_heading(info: dict) -> str:
+def local_heading(info: dict, plan: dict | None = None) -> str:
+    """The commits, led by the agent's summary of the work when there is one and followed by the branch's plan."""
     commits = "\n\n".join(
         f"## {c['sha'][:7]} {c['subject']}" + (f"\n{c['body']}" if c["body"] else "") for c in info["commits"]
     )
-    return f"# Unpushed commits on branch {info['branch']}\nThe commits, oldest first. Each chunk names its commit.\n\n{commits}"
+    s = info.get("summary") or {}
+    about = [f"{label}: {s[key]}" for label, key in (("Title", "title"), ("Ticket", "ticket")) if s.get(key)]
+    if s.get("body"):
+        about.append(s["body"])
+    intro = "What the work is for, as the agent that made the commits describes it:\n" + "\n".join(about) + "\n\n"
+    plan_section = f"\n\n# Plan (may be older than the code)\nFrom {plan['name']}.\n\n{plan['body']}" if plan else ""
+    return (
+        f"# Unpushed commits on branch {info['branch']}\n{intro if about else ''}"
+        f"The commits, oldest first. Each chunk names its commit.\n\n{commits}{plan_section}"
+    )
 
 
 def pr_heading(pr: dict) -> str:
@@ -102,7 +112,7 @@ def pr_heading(pr: dict) -> str:
 def context_block(ctx: dict) -> str:
     """The prompt context of a PR, or of local commits when `ctx` has `local`. The tag stays `pr_context` because
     SYSTEM tells Claude to treat that tag's content as data."""
-    parts = [local_heading(ctx["local"]) if "local" in ctx else pr_heading(ctx["pr"])]
+    parts = [local_heading(ctx["local"], ctx.get("plan")) if "local" in ctx else pr_heading(ctx["pr"])]
     if ctx["instructions"]:
         parts.append(
             "# Project instructions\n"

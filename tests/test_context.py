@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import pytest
+
 from diffsplainer import context, local
 from diffsplainer import github as gh
 
@@ -166,3 +170,81 @@ def test_local_related_pulls_is_empty_when_the_origin_cannot_be_read(repo, monke
     monkeypatch.setattr(local, "run", fail)
     assert context.local_related_pulls(repo.path, "b", ["a.py"], 3) == []
     assert calls == []
+
+
+def _plans(repo, files: dict[str, str]):
+    for name, text in files.items():
+        (repo.path / ".git" / "approach" / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo.path / ".git" / "approach" / name).write_text(text)
+
+
+def test_local_plan_is_the_file_named_after_the_branch(repo):
+    _plans(repo, {"feature-x.md": "The plan.", "other.md": "No."})
+    assert context.local_plan(repo.path, "feature-x") == {"name": "feature-x.md", "body": "The plan."}
+
+
+def test_local_plan_follows_a_branch_name_with_a_slash_into_a_directory(repo):
+    _plans(repo, {"feature/cache.md": "Nested."})
+    assert context.local_plan(repo.path, "feature/cache")["name"] == "feature/cache.md"
+
+
+@pytest.mark.parametrize(
+    "branch, key",
+    [
+        ("BH-740-add-cache", "BH-740"),
+        ("BH-740", "BH-740"),
+        ("1234-fix-it", "1234"),
+        ("1234", "1234"),
+        ("AB2-7-x", "AB2-7"),
+    ],
+)
+def test_local_plan_falls_back_to_the_ticket_key_of_the_branch(repo, branch, key):
+    _plans(repo, {f"{key}.md": "By key."})
+    assert context.local_plan(repo.path, branch) == {"name": f"{key}.md", "body": "By key."}
+
+
+def test_local_plan_prefers_the_branch_file_to_the_ticket_file(repo):
+    _plans(repo, {"BH-740.md": "Key.", "BH-740-add-cache.md": "Branch."})
+    assert context.local_plan(repo.path, "BH-740-add-cache")["body"] == "Branch."
+
+
+@pytest.mark.parametrize("branch", ["12abc", "bh-740-x", "BH-740x", "x-BH-740", "feature-x"])
+def test_local_plan_does_not_take_a_ticket_key_from_a_branch_that_does_not_start_with_one(repo, branch):
+    _plans(repo, {"12.md": "n", "bh-740.md": "n", "BH-740.md": "n", "feature.md": "n"})
+    assert context.local_plan(repo.path, branch) is None
+
+
+def test_local_plan_is_none_without_an_approach_directory_and_for_a_detached_head(repo):
+    assert context.local_plan(repo.path, "main") is None
+    _plans(repo, {"HEAD.md": "n"})
+    assert context.local_plan(repo.path, "HEAD") is None  # `git branch --show-current` is empty, so load says HEAD
+
+
+@pytest.mark.parametrize("branch, name", [("feature-pr", "feature-pr.md"), ("feature.ticket", "feature.ticket.md")])
+def test_local_plan_skips_the_ticket_and_pr_description_files(repo, branch, name):
+    _plans(repo, {name: "Not a plan."})
+    assert context.local_plan(repo.path, branch) is None
+
+
+def test_local_plan_refuses_a_file_outside_the_approach_directory(repo, tmp_path):
+    _plans(repo, {"x.md": "n"})
+    (repo.path / ".git" / "secret.md").write_text("SECRET")
+    (tmp_path / "outside.md").write_text("SECRET")
+    (repo.path / ".git" / "approach" / "linked.md").symlink_to(tmp_path / "outside.md")
+    assert context.local_plan(repo.path, "../secret") is None
+    assert context.local_plan(repo.path, "linked") is None
+
+
+def test_local_plan_clips_a_long_plan_and_skips_a_file_that_is_not_text(repo):
+    _plans(repo, {"long.md": "x" * (context.MAX_PLAN_CHARS + 10)})
+    (repo.path / ".git" / "approach" / "bin.md").write_bytes(b"\xff\xfe\x00")
+    assert context.local_plan(repo.path, "long")["body"].endswith("…[truncated]")
+    assert context.local_plan(repo.path, "bin") is None
+
+
+def test_local_plan_is_found_from_a_linked_worktree(repo, tmp_path):
+    repo.git("worktree", "add", "-q", "-b", "wt", str(tmp_path / "wt"))
+    approach = Path(repo.git("rev-parse", "--absolute-git-dir", cwd=tmp_path / "wt")) / "approach"
+    approach.mkdir()
+    (approach / "wt.md").write_text("In the worktree's git dir.")
+    assert context.local_plan(tmp_path / "wt", "wt")["body"] == "In the worktree's git dir."

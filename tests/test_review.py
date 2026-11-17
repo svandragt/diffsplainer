@@ -276,3 +276,42 @@ def test_a_file_that_keeps_changing_is_a_review_error_and_keeps_the_agents_write
         review.update(repo.path, change)
     assert read(repo)["agent"] == len(calls)
     assert os.listdir(review.path(repo.path).parent) == ["review.json"]
+
+
+def test_summary_returns_the_string_fields_the_agent_wrote():
+    given = {"title": "Cache feeds", "ticket": "BH-1", "body": "Why.\nHow."}
+    assert review.summary({"summary": given}) == given
+
+
+def test_summary_ignores_a_field_that_is_not_a_string_and_blank_text():
+    got = review.summary({"summary": {"title": "T", "ticket": 12, "body": "  "}})
+    assert got == {"title": "T", "ticket": None, "body": None}
+
+
+def test_summary_clips_long_fields_because_they_go_into_every_prompt():
+    got = review.summary({"summary": {"title": "t" * 1000, "ticket": "k" * 1000, "body": "b" * 10000}})
+    assert len(got["title"]) <= 200 and len(got["ticket"]) <= 200 and len(got["body"]) <= 3000
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {},
+        {"summary": None},
+        {"summary": "text"},
+        {"summary": ["a"]},
+        {"summary": {}},
+        {"summary": {"title": 5, "body": []}},
+    ],
+)
+def test_a_missing_or_malformed_summary_is_none(data):
+    assert review.summary(data) is None
+
+
+def test_a_write_keeps_the_agents_summary(repo):
+    summary = {"title": "Cache feeds", "ticket": None, "body": "Why."}
+    review.path(repo.path).parent.mkdir()
+    review.path(repo.path).write_text(json.dumps({"summary": summary}))
+    entry(repo)
+    review.apply(repo.path, {"action": "start", "head": repo.b}, {repo.b})
+    assert read(repo)["summary"] == summary

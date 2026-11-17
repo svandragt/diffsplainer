@@ -201,9 +201,10 @@ function explain(url) {
   });
 
   source.addEventListener('context', (e) => {
-    const { instructions, related } = JSON.parse(e.data);
+    const { instructions, related, plan } = JSON.parse(e.data);
     $('#context').innerHTML = `<h2>Context given to Claude</h2>
       <div><b>Project instructions:</b> ${instructions.length ? instructions.map((p) => `<code>${esc(p)}</code>`).join(' ') : 'none found'}</div>
+      ${session ? `<div><b>Plan:</b> ${plan ? `<code>${esc(plan)}</code>` : 'none'}</div>` : ''}
       <div><b>Previous PRs:</b> ${related.length ? '' : 'none'}</div>
       ${related.length ? `<ul>${related.map((p) => `<li><a href="${esc(p.url)}" target="_blank" rel="noopener">#${p.number}</a> ${esc(p.title)}</li>`).join('')}</ul>` : ''}`;
   });
@@ -377,9 +378,22 @@ async function loadLocal(seq, recorded = '') {
   if (!res || res.status === 404) return seq === loadSeq && setApp(emptyHtml);
   const data = await res.json().catch(() => ({ error: `Error ${res.status}` })); // #app stays hidden until a setApp
   if (seq !== loadSeq) return;
-  document.title = 'Unpushed commits · Diffsplainer';
+  document.title = `${data.local?.summary?.title ?? 'Unpushed commits'} · Diffsplainer`;
   if (!res.ok) return setApp(`<div class="card">Could not load the commits: ${esc(data.error)}</div>`);
   renderLocal(data, recorded);
+}
+
+// The top of the page: the repository and branch, then the agent's summary of the work. Without a summary, the commit count.
+function renderAbout(info, count) {
+  const s = info.summary;
+  if (!s) {
+    const heading = h('h1', null, `${count} on `);
+    heading.append(h('code', null, info.branch));
+    return [heading];
+  }
+  const where = h('div', 'meta where');
+  where.append(h('code', null, info.repo), h('code', null, info.branch));
+  return [where, h('h1', null, s.title ?? count), s.ticket && h('div', 'meta', s.ticket), s.body && h('p', 'summary-body', s.body)].filter(Boolean);
 }
 
 function renderLocal({ local: info, files, review }, recorded) {
@@ -387,16 +401,20 @@ function renderLocal({ local: info, files, review }, recorded) {
   files.forEach((f) => f.chunks.forEach((c) => session.chunks.set(c.id, { file: f.filename, c })));
   const n = info.commits.length;
   const sum = (key) => files.reduce((t, f) => t + f[key], 0);
+  const count = n ? plural(n, 'unpushed commit') : 'No unpushed commits';
+  const stats = n ? `${plural(files.length, 'file')} <span class="plus">+${sum('additions')}</span> <span class="minus">−${sum('deletions')}</span>` : '';
+  const line = [info.summary && count, stats].filter(Boolean).join(' · ');
   setApp(`
     <section class="card pr-head">
-      <h1>${n ? plural(n, 'unpushed commit') : 'No unpushed commits'} on <code>${esc(info.branch)}</code></h1>
-      ${n ? `<div class="meta">${plural(files.length, 'file')} <span class="plus">+${sum('additions')}</span> <span class="minus">−${sum('deletions')}</span></div>
-      <div class="status" id="status">Starting…</div>
+      <div id="about"></div>
+      ${line ? `<div class="meta">${line}</div>` : ''}
+      ${n ? `<div class="status" id="status">Starting…</div>
       <div class="progress"><div id="bar"></div></div>` : ''}
     </section>
     ${n ? '<section class="card commits" id="commits"></section>' : ''}
     <section class="card review" id="review"></section>
     ${n ? skeletonCards + files.map(renderFile).join('') : ''}`);
+  $('#about').replaceChildren(...renderAbout(info, count));
   renderCommits();
   renderReview();
   if (!n) return;

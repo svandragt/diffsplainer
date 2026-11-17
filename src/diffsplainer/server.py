@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import os
@@ -31,7 +32,7 @@ from .claude import (
     explain_overview,
     explain_term,
 )
-from .context import local_instructions, local_related_pulls, project_instructions, related_pulls
+from .context import local_instructions, local_plan, local_related_pulls, project_instructions, related_pulls
 from .diff import chunk_files, tree_order
 
 PORT = int(os.environ.get("PORT", "3000"))
@@ -444,7 +445,10 @@ class Handler(BaseHTTPRequestHandler):
             )
         if not files:
             return send("done", {})
-        key = f"local:{LOCAL_REPO}@{info['base']}..{info['head']}:{pr_limit}"
+        plan = local_plan(LOCAL_REPO, info["branch"])
+        # The summary and the plan are in the prompt, so an edit to either needs new explanations.
+        digest = hashlib.sha256(json.dumps([info["summary"], plan], sort_keys=True).encode()).hexdigest()[:12]
+        key = f"local:{LOCAL_REPO}@{info['base']}..{info['head']}:{pr_limit}:{digest}"
 
         def context():
             paths = [f["filename"] for f in files]
@@ -453,7 +457,7 @@ class Handler(BaseHTTPRequestHandler):
                 instr_f = pool.submit(local_instructions, LOCAL_REPO, paths)
                 rel_f = pool.submit(local_related_pulls, LOCAL_REPO, info["merge_base"], paths, pr_limit)
                 instructions, related = instr_f.result(), rel_f.result()
-            return {"local": info, "instructions": instructions, "related": related, "files": files}
+            return {"local": info, "plan": plan, "instructions": instructions, "related": related, "files": files}
 
         explain_changes(key, context, send, gone)
 
@@ -478,13 +482,13 @@ def explain_changes(key, build_context, send, gone):
 
     ctx = build_context()
     files = ctx["files"]
-    emit(
-        "context",
-        {
-            "instructions": [d["path"] for d in ctx["instructions"]],
-            "related": [{k: v for k, v in r.items() if k != "body"} for r in ctx["related"]],
-        },
-    )
+    shown = {
+        "instructions": [d["path"] for d in ctx["instructions"]],
+        "related": [{k: v for k, v in r.items() if k != "body"} for r in ctx["related"]],
+    }
+    if "local" in ctx:
+        shown["plan"] = ctx["plan"]["name"] if ctx["plan"] else None  # the name only: the page does not get the text
+    emit("context", shown)
 
     work = [b for f in files if f["chunks"] for b in batches(f)]
     total = len(work) + 1

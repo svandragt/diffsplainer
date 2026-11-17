@@ -287,3 +287,41 @@ def test_explain_file_for_local_commits_sends_the_local_context(monkeypatch):
     seen = _capture_prompt(monkeypatch)
     claude.explain_file(LOCAL_CTX, FILE)
     assert "1234567 Add cache" in seen["prompt"] and "Pull request #" not in seen["prompt"]
+
+
+SUMMARY = {"title": "Cache feeds", "ticket": "BH-1", "body": "Feeds load on every request.\nCache them for a minute."}
+
+
+def with_summary(summary, **more):
+    return {**LOCAL_CTX, "local": {**LOCAL_CTX["local"], "summary": summary}, **more}
+
+
+def test_context_block_for_local_commits_puts_the_summary_before_the_commit_list():
+    block = claude.context_block(with_summary(SUMMARY))
+    for text in ("Title: Cache feeds", "Ticket: BH-1", "Feeds load on every request.\nCache them for a minute."):
+        assert text in block
+        assert block.index(text) < block.index("1234567 Add cache")
+
+
+def test_context_block_for_local_commits_leaves_out_the_parts_of_the_summary_that_are_missing():
+    block = claude.context_block(with_summary({"title": "Cache feeds", "ticket": None, "body": None}))
+    assert "Title: Cache feeds" in block and "Ticket:" not in block
+
+
+def test_context_block_for_local_commits_without_a_summary_or_plan_has_neither():
+    for ctx in (LOCAL_CTX, with_summary(None, plan=None)):
+        block = claude.context_block(ctx)
+        assert "Title:" not in block and "Plan" not in block
+
+
+def test_context_block_for_local_commits_gives_the_plan_its_own_labelled_section():
+    block = claude.context_block({**LOCAL_CTX, "plan": {"name": "feature-x.md", "body": "Step 1.\nStep 2."}})
+    assert "# Plan (may be older than the code)" in block
+    assert "feature-x.md" in block and "Step 1.\nStep 2." in block
+    assert block.index("1234567 Add cache") < block.index("# Plan")
+
+
+def test_a_pr_context_ignores_a_plan_and_a_summary():
+    pr = {"number": 4, "title": "T", "user": "u", "base": "main", "head": "x", "body": "B"}
+    ctx = {"pr": pr, "instructions": [], "related": [], "files": [], "plan": {"name": "n", "body": "P"}}
+    assert "# Plan" not in claude.context_block(ctx)

@@ -88,6 +88,8 @@ main { max-width: 1600px; margin: 0 auto; padding: 16px; }
 .btn.primary { background: var(--accent); color: var(--bg); border-color: transparent; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .commits h2, .review h2 { margin: 0 0 8px; font-size: 15px; }
+.pr-head .where { margin-bottom: 4px; }
+.summary-body { margin: 6px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .commit-list { list-style: none; margin: 0; padding: 0; }
 .commit-list li { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--border); }
 .commit-list li:first-child { border-top: 0; }

@@ -261,3 +261,16 @@ def test_origin_repo_follows_the_github_api_host(repo, monkeypatch):
     assert local.origin_repo(repo.path) == ("owner", "repo")
     repo.git("remote", "set-url", "origin", "git@github.com:owner/repo.git")
     assert local.origin_repo(repo.path) is None
+
+
+def test_load_names_the_repository_directory_and_returns_the_agents_summary(repo):
+    summary = {"title": "Cache feeds", "ticket": "BH-1", "body": "Why."}
+    write_review(repo, summary=summary)
+    info = local.load(repo.path)["local"]
+    assert (info["repo"], info["summary"]) == ("work", summary)
+
+
+@pytest.mark.parametrize("summary", [None, "text", [1], {"title": 3}])
+def test_load_gives_no_summary_when_the_file_has_none_or_a_malformed_one(repo, summary):
+    write_review(repo, summary=summary)
+    assert local.load(repo.path)["local"]["summary"] is None

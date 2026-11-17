@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from itertools import zip_longest
 from pathlib import Path
@@ -15,6 +16,8 @@ MAX_DOC_CHARS = 6000
 MAX_TOTAL_DOC_CHARS = 20000
 MAX_PATHS = 8  # changed files we look up history for
 MAX_SHAS = 12  # commits we map back to PRs
+MAX_PLAN_CHARS = 8000
+TICKET_KEY_RE = re.compile(r"(?:[A-Z][A-Z0-9]+-\d+|\d+)(?=-|$)")  # `BH-740` or `1234` at the start of a branch name
 
 
 def clip(s: str | None, n: int) -> str:
@@ -80,6 +83,28 @@ def local_instructions(repo: Path, changed: list[str]) -> list[dict]:
 
     nested = [f"{d}/{name}" for d in sorted(_changed_dirs(changed)) for name in sorted(NESTED_DOCS)]
     return _read_docs([*ROOT_DOCS, *nested, "README.md"], read)
+
+
+def local_plan(repo: Path, branch: str) -> dict | None:
+    """The plan for `branch` in the git directory's `approach/` folder, as `{name, body}` (body clipped), or None.
+
+    The file is `<branch>.md`, else `<ticket key>.md` when the branch starts with a ticket key. A `*.ticket.md` or
+    `*-pr.md` file is not a plan. A candidate whose real path is outside `approach/` is refused."""
+    if branch == "HEAD":  # detached: `load` reports it so, and git refuses a branch with that name
+        return None
+    approach = (Path(local.git(repo, "rev-parse", "--absolute-git-dir").strip()) / "approach").resolve()
+    key = TICKET_KEY_RE.match(branch)
+    for name in [branch, *([key[0]] if key else [])]:
+        file = (approach / f"{name}.md").resolve()
+        if name.endswith(("-pr", ".ticket")) or not file.is_relative_to(approach) or not file.is_file():
+            continue
+        try:
+            text = file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if text.strip():
+            return {"name": f"{name}.md", "body": clip(text, MAX_PLAN_CHARS)}
+    return None
 
 
 def _round_robin_shas(commit_lists: list[list[dict]], limit: int) -> list[str]:

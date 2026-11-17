@@ -19,6 +19,7 @@ If the file does not exist, there are no comments.
 {
   "reviews": [{"head": "<sha>", "at": "<ISO time>"}],
   "approved": ["<commit sha>"],
+  "summary": {"title": "<what the commits do>", "ticket": "<key or URL, or null>", "body": "<the goal and the approach>"},
   "entries": [
     {
       "id": "r1",
@@ -42,6 +43,7 @@ If the file does not exist, there are no comments.
 - `sha` is the commit the entry is about.
 - `lines` is a hint that goes out of date after the first fixup. Find the place by matching `diff`.
 - `reply` is `null` until you answer.
+- `summary` is yours, and it is optional. The page shows it at the top, and Claude reads it as the description of the work. Each field is a string or `null`.
 - `reviews` lists the HEAD of each review round. `approved` lists approved commits. Diffsplainer fills it only when the person clicks "Approve all and finish", which adds every commit of that round at once and is possible only when no entry is open.
 
 ## Protocol
@@ -55,7 +57,15 @@ If the file does not exist, there are no comments.
 
 ## Start the review
 
-When you list your unpushed commits for the person's review, start Diffsplainer yourself in the background, then start the wait below straight away. Do not ask the person to start it, and do not wait for them to say they have reviewed.
+When you list your unpushed commits for the person's review, write the summary, start Diffsplainer yourself in the background, then start the wait below straight away. Do not ask the person to start it, and do not wait for them to say they have reviewed.
+
+Before you start the server, write `summary` into the review file, so the page and Claude say what the work is for:
+
+- `title` is what the commits do, worded as a PR title.
+- `ticket` is the ticket or issue key or URL, or `null`.
+- `body` is two to five sentences: the goal, the approach, and anything the reviewer should check.
+
+Write it like a reply: read the file, change only `summary`, write a temporary file in the same directory and rename it over `review.json`. If the file does not exist, create the `diffsplainer` directory in the git directory and the file as `{"reviews":[],"approved":[],"entries":[],"summary":{...}}`. Update the summary when a later round changes the scope. Claude also reads the plan for the branch, `approach/<branch>.md` in the git directory, when there is one.
 
 ```sh
 gd="$(git rev-parse --absolute-git-dir)"; mkdir -p "$gd/diffsplainer"
@@ -90,7 +100,7 @@ When the wait returns, check for approval first. The round's commits are `git lo
 
 ## Rules
 
-- Write only `reply`. Never change `status`, `body`, `quote`, `diff`, `sha`, `lines`, `id`, `created`, `reviews` or `approved`. The person resolves entries and approves commits ("Approve all and finish") in Diffsplainer.
+- Write only `reply` on the entries and the top-level `summary`. Never change `status`, `body`, `quote`, `diff`, `sha`, `lines`, `id`, `created`, `reviews` or `approved`. The person resolves entries and approves commits ("Approve all and finish") in Diffsplainer.
 - Keep every field you do not know, on every entry and at the top level.
 - Do not add, delete or reorder entries.
 - If the file is not valid JSON, do not write to it. Tell the person.

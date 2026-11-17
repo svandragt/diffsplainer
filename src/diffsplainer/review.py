@@ -17,6 +17,7 @@ from pathlib import Path
 
 SHA_RE = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")  # SHA-1 or SHA-256
 STATUSES = ("open", "resolved")
+SUMMARY_FIELDS = {"title": 200, "ticket": 200, "body": 3000}  # field -> max chars: it goes into every prompt
 _ENTRY_FIELDS = ("file", "lines", "diff", "body")
 _lock = threading.Lock()
 
@@ -68,6 +69,16 @@ def last_head(data: dict) -> str | None:
     newest = data["reviews"][-1] if data["reviews"] else None
     head = newest.get("head") if isinstance(newest, dict) else None
     return head if isinstance(head, str) and SHA_RE.fullmatch(head) else None
+
+
+def summary(data: dict) -> dict | None:
+    """The agent's `summary` (`title`, `ticket`, `body`): each field a non-blank string or None, or None as a whole when
+    nothing usable is there. The agent writes it and Diffsplainer never does, so no other type is trusted."""
+    raw = data.get("summary")
+    if not isinstance(raw, dict):
+        return None
+    got = {k: v.strip()[:n] or None if isinstance(v := raw.get(k), str) else None for k, n in SUMMARY_FIELDS.items()}
+    return got if any(got.values()) else None
 
 
 def update(repo: Path, change, attempts: int = 5) -> dict:

@@ -157,12 +157,22 @@ def changes(repo: Path, base: str, head: str) -> tuple[list[dict], list[dict]]:
 
 
 def load(repo: Path) -> dict:
-    """The commits under review, their combined diff chunked and tagged with commits, and the review file."""
+    """The commits under review, their combined diff chunked and tagged with commits, and the review file. `summary` is
+    the agent's description of the work from that file, checked by `review.summary`."""
     merge_base, base, head = ranges(repo)
     commits, files = changes(repo, base, head)
     branch = git(repo, "branch", "--show-current").strip() or "HEAD"
+    file = review.read(repo)
     return {
-        "local": {"branch": branch, "base": base, "head": head, "merge_base": merge_base, "commits": commits},
+        "local": {
+            "repo": repo.resolve().name,
+            "branch": branch,
+            "base": base,
+            "head": head,
+            "merge_base": merge_base,
+            "commits": commits,
+            "summary": review.summary(file),
+        },
         "files": files,
-        "review": review.read(repo),
+        "review": file,
     }

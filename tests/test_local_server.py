@@ -54,6 +54,34 @@ def test_api_local_returns_the_commits_the_tagged_chunks_and_the_review(serve, l
     assert data["review"] == {"reviews": [], "approved": [], "entries": []}
 
 
+def write_file(repo, **data):
+    p = repo.path / ".git" / "diffsplainer" / "review.json"
+    p.parent.mkdir(exist_ok=True)
+    p.write_text(json.dumps(data))
+
+
+def test_api_local_returns_the_repository_name_and_the_agents_summary(serve, local_repo):
+    summary = {"title": "Cache feeds", "ticket": "BH-1", "body": "Why."}
+    write_file(local_repo, summary=summary)
+    status, data = send(serve, "GET", "/api/local")
+    assert status == 200
+    assert (data["local"]["repo"], data["local"]["summary"]) == ("work", summary)
+
+
+def test_api_local_returns_no_summary_for_a_malformed_one_and_does_not_fail(serve, local_repo):
+    write_file(local_repo, summary={"title": ["x"], "ticket": 4, "body": {}})
+    status, data = send(serve, "GET", "/api/local")
+    assert (status, data["local"]["summary"]) == (200, None)
+
+
+def test_a_page_write_over_http_keeps_the_agents_summary(serve, local_repo):
+    summary = {"title": "Cache feeds", "ticket": None, "body": "Why."}
+    write_file(local_repo, summary=summary)
+    status, data = post(serve, {"action": "start", "head": local_repo.b})
+    assert status == 200 and data["review"]["summary"] == summary
+    assert review_file(local_repo)["summary"] == summary
+
+
 def test_api_local_reports_a_range_that_cannot_be_found(serve, local_repo):
     local_repo.git("switch", "-q", "-c", "feature")
     local_repo.git("remote", "remove", "origin")
@@ -267,11 +295,47 @@ def test_explaining_local_commits_streams_the_chunks_with_the_commit_context(ser
     events = explain_events(serve)
     names = [e for e, _ in events]
     assert names.count("chunk") == 4 and names.count("overview") == 1 and names[-1] == "done"
-    assert ("context", {"instructions": ["AGENTS.md"], "related": []}) in events
+    assert ("context", {"instructions": ["AGENTS.md"], "related": [], "plan": None}) in events
     ctx, _ = fake_claude.files[0]
     assert ctx["local"]["branch"] == "main"
     assert [c["subject"] for c in ctx["local"]["commits"]] == ["Add greeting", "Trim gone.txt and edit b.py"]
     assert ctx["instructions"] == [{"path": "AGENTS.md", "body": "Project rules.\n"}]
+
+
+def test_explaining_local_commits_gives_claude_the_summary_and_the_plan_and_tells_the_page_the_plan_name(
+    serve, local_repo, fake_claude
+):
+    summary = {"title": "Cache feeds", "ticket": "BH-1", "body": "Why."}
+    write_file(local_repo, summary=summary)
+    plan = local_repo.path / ".git" / "approach"
+    plan.mkdir()
+    (plan / "main.md").write_text("Plan body.")
+    events = explain_events(serve)
+    assert context_event(events)["plan"] == "main.md"
+    assert "Plan body." not in json.dumps(events)  # the page gets the name, not the text
+    ctx, _ = fake_claude.files[0]
+    assert ctx["local"]["summary"] == summary
+    assert ctx["plan"] == {"name": "main.md", "body": "Plan body."}
+    assert fake_claude.overviews[0]["plan"] == ctx["plan"]
+
+
+def test_a_changed_summary_or_plan_gets_new_explanations(serve, local_repo, fake_claude):
+    explain_events(serve)
+    explain_events(serve)
+    assert len(fake_claude.files) == 4  # the same summary and plan: from the cache
+    write_file(local_repo, summary={"title": "Cache feeds", "ticket": None, "body": None})
+    explain_events(serve)
+    assert len(fake_claude.files) == 4 + 4
+    explain_events(serve)
+    assert len(fake_claude.files) == 4 + 4
+    plan = local_repo.path / ".git" / "approach"
+    plan.mkdir()
+    (plan / "main.md").write_text("First.")
+    explain_events(serve)
+    assert len(fake_claude.files) == 4 + 4 + 4
+    (plan / "main.md").write_text("Second.")
+    explain_events(serve)
+    assert len(fake_claude.files) == 4 + 4 + 4 + 4
 
 
 @pytest.fixture
