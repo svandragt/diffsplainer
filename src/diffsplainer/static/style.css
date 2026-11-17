@@ -59,6 +59,15 @@ main { max-width: 1600px; margin: 0 auto; padding: 16px; }
 .file-head .name { font-weight: 600; overflow-wrap: anywhere; }
 .file-head .stat { margin-left: auto; white-space: nowrap; }
 .file-head .tag { font-family: system-ui; font-size: 11px; padding: 0 6px; border: 1px solid var(--border); border-radius: 99px; color: var(--muted); }
+.file-head .note { font-family: system-ui; font-size: 12px; color: var(--muted); }
+/* A generated file is a <details>: its head is the <summary>, and its chunks have no explanation column. */
+summary.file-head { cursor: pointer; }
+summary.file-head::-webkit-details-marker { display: none; }
+summary.file-head::before { content: "▸"; color: var(--muted); }
+details[open] > summary.file-head::before { content: "▾"; }
+details.generated:not([open]) > .file-head { border-radius: 8px; }
+.generated .row { grid-template-columns: 1fr; }
+.generated .explain { border-right: 0; border-bottom: 1px solid var(--border); }
 
 .row { display: grid; grid-template-columns: minmax(280px, 38%) 1fr; border: 1px solid var(--border); border-top: 0; background: var(--panel); }
 .row:last-child { border-radius: 0 0 8px 8px; }

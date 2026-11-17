@@ -269,7 +269,7 @@ def test_no_write_endpoint_changes_the_work_tree_the_index_or_any_ref(serve, loc
 @pytest.fixture
 def fake_claude(monkeypatch):
     server._explain_cache.clear()
-    calls = SimpleNamespace(files=[], overviews=[])
+    calls = SimpleNamespace(files=[], overviews=[], overview_files=[])
 
     def explain_file(ctx, file, cancel=None):
         calls.files.append((ctx, file))
@@ -277,6 +277,7 @@ def fake_claude(monkeypatch):
 
     def explain_overview(ctx, files, cancel=None):
         calls.overviews.append(ctx)
+        calls.overview_files.append(files)
         return {"summary": "s", "approach": "a", "review_focus": []}
 
     monkeypatch.setattr(server, "explain_file", explain_file)
@@ -474,6 +475,47 @@ def test_a_range_over_the_line_cap_skips_claude_and_says_why(serve, local_repo, 
     ((event, payload),) = explain_events(serve)
     assert (event, payload["scope"]) == ("error", "limit") and "commits change" in payload["message"]
     assert fake_claude.files == []
+
+
+def add_generated_files(repo):
+    """A lockfile of 500 lines and a file marked `linguist-generated` of 100, committed after the fixture's commits."""
+    (repo.path / ".gitattributes").write_text("*.gen linguist-generated\n")
+    (repo.path / "package-lock.json").write_text("".join(f'"dep{i}": 1,\n' for i in range(500)))
+    (repo.path / "out.gen").write_text("".join(f"g{i}\n" for i in range(100)))
+    repo.commit("Add generated files")
+
+
+def test_generated_files_do_not_count_toward_the_line_cap_and_are_not_explained(
+    serve, local_repo, fake_claude, monkeypatch
+):
+    monkeypatch.setattr(server, "MAX_CHANGED_LINES", 10)  # 9 lines of the other files, 600 generated
+    add_generated_files(local_repo)
+    events = explain_events(serve)
+    assert events[-1] == ("done", {}) and not any(e == "error" for e, _ in events)
+    explained = {f["filename"] for _, f in fake_claude.files}
+    assert explained == {".gitattributes", "a.py", "b.py", "drop.txt", "gone.txt"}
+    ids = {c["id"] for e, c in events if e == "chunk"}
+    assert ids and not {i for i in ids if i.startswith(("f5", "f6"))}  # out.gen and package-lock.json sort last
+    (overview_files,) = fake_claude.overview_files
+    assert {f["filename"] for f in overview_files} == explained
+
+
+def test_a_range_of_only_a_lockfile_is_explained_without_any_file_batch(serve, local_repo, fake_claude, monkeypatch):
+    local_repo.git("push", "-q")
+    monkeypatch.setattr(server, "MAX_CHANGED_LINES", 1)
+    (local_repo.path / "uv.lock").write_text("x\n" * 50)
+    local_repo.commit("Lock")
+    events = explain_events(serve)
+    assert events[-1] == ("done", {}) and not any(e == "error" for e, _ in events)
+    assert fake_claude.files == []
+
+
+def test_api_local_marks_generated_files_and_still_lists_their_chunks(serve, local_repo):
+    add_generated_files(local_repo)
+    _, data = send(serve, "GET", "/api/local")
+    files = {f["filename"]: f for f in data["files"]}
+    assert files["package-lock.json"]["generated"] and files["out.gen"]["generated"]
+    assert files["package-lock.json"]["chunks"] and not files["a.py"]["generated"]
 
 
 @pytest.fixture

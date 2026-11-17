@@ -159,19 +159,23 @@ const lazy = typeof Prism === 'undefined' ? null : new IntersectionObserver((ent
   highlight(e.target);
 }), { rootMargin: '200px' });
 
+// A generated file (a lockfile, say) is not explained: it starts collapsed, with a note, and its chunks get no skeleton.
 function renderFile(f) {
   const rename = f.previous ? `<span class="tag">renamed from ${esc(f.previous)}</span>` : '';
-  const head = `<div class="file-head"><span class="tag">${f.status}</span><span class="name">${esc(f.filename)}</span>${rename}
-    <span class="stat"><span class="plus">+${f.additions}</span> <span class="minus">−${f.deletions}</span></span></div>`;
+  const note = f.generated ? '<span class="note">Generated file, not explained.</span>' : '';
+  const head = `<span class="tag">${f.status}</span><span class="name">${esc(f.filename)}</span>${rename}${note}
+    <span class="stat"><span class="plus">+${f.additions}</span> <span class="minus">−${f.deletions}</span></span>`;
   const rows = f.chunks.length
-    ? f.chunks.map((c) => renderChunk(c, langOf(f.filename))).join('')
+    ? f.chunks.map((c) => renderChunk(c, langOf(f.filename), f.generated)).join('')
     : `<div class="row"><div class="nodiff">No textual diff (binary, too large, or rename only).</div></div>`;
-  return `<section class="file">${head}${rows}</section>`;
+  return f.generated
+    ? `<details class="file generated"><summary class="file-head">${head}</summary>${rows}</details>`
+    : `<section class="file"><div class="file-head">${head}</div>${rows}</section>`;
 }
 
 const mark = (t) => (t === 'add' ? '+' : t === 'del' ? '-' : ' ');
 
-function renderChunk(c, lang) {
+function renderChunk(c, lang, generated) {
   const body = c.lines
     .map((l) => {
       const m = mark(l.t);
@@ -181,8 +185,10 @@ function renderChunk(c, lang) {
   const scope = c.scope ? `<tr class="scope"><td colspan="3">${esc(c.scope)}</td></tr>` : '';
   const tools = session ? `<div class="chunk-tools"><div class="chunk-bar"><code class="sha">${c.sha ? esc(c.sha.slice(0, 7)) : 'unknown commit'}</code>
     <button type="button" class="btn req">Request changes</button></div></div>` : '';
+  const inner = generated ? '' : '<div class="inner"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton short"></div></div>';
+  const aside = generated && !tools ? '' : `<aside class="explain">${tools}${inner}</aside>`;
   return `<div class="row" id="${c.id}">
-    <aside class="explain">${tools}<div class="inner"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton short"></div></div></aside>
+    ${aside}
     <div class="diff"${lang ? ` data-lang="${lang}"` : ''}><table>${scope}${body}</table></div>
   </div>`;
 }

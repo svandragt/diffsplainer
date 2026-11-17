@@ -8,10 +8,26 @@ new files) at top-level blocks. Each chunk then covers one coherent change.
 from __future__ import annotations
 
 import re
+from collections.abc import Container
 
 LONG_HUNK = 30  # lines before we try to split a hunk
 GAP = 3  # context lines kept either side of a split
 MIN_BLOCK = 12  # min lines before a top-level declaration may start a new chunk
+
+# Lockfiles by base name. Other generated files are found by the `linguist-generated` attribute (see `local`).
+GENERATED_NAMES = {
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "composer.lock",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "uv.lock",
+    "poetry.lock",
+    "Pipfile.lock",
+    "Cargo.lock",
+    "Gemfile.lock",
+    "go.sum",
+}
 
 HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$")
 
@@ -89,7 +105,8 @@ def tree_order(path: str) -> list[tuple[int, str]]:
     return [(0, d.casefold()) for d in dirs] + [(1, name.casefold())]
 
 
-def chunk_files(files: list[dict]) -> list[dict]:
+def chunk_files(files: list[dict], generated: Container[str] = ()) -> list[dict]:
+    """Chunk each file's patch. A file is `generated` when it is a lockfile or its path is in `generated`."""
     out = []
     for fi, f in enumerate(files):
         chunks = []
@@ -107,6 +124,7 @@ def chunk_files(files: list[dict]) -> list[dict]:
                 "status": f.get("status"),
                 "additions": f.get("additions", 0),
                 "deletions": f.get("deletions", 0),
+                "generated": f["filename"].rpartition("/")[2] in GENERATED_NAMES or f["filename"] in generated,
                 "chunks": chunks,
             }
         )

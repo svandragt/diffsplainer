@@ -407,7 +407,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _explain(self, owner, repo, num, pr_limit, send, gone):
         data = load_pr(owner, repo, num)
+        # a generated file is not explained, so its lines are not what the limit is for
         changed = data["pr"]["additions"] + data["pr"]["deletions"]
+        changed -= sum(f["additions"] + f["deletions"] for f in data["files"] if f["generated"])
         if changed > MAX_CHANGED_LINES:
             return send(
                 "error",
@@ -433,7 +435,7 @@ class Handler(BaseHTTPRequestHandler):
     def _explain_local(self, pr_limit, send, gone):
         data = local.load(LOCAL_REPO)
         info, files = data["local"], data["files"]
-        changed = sum(f["additions"] + f["deletions"] for f in files)
+        changed = sum(f["additions"] + f["deletions"] for f in files if not f["generated"])
         if changed > MAX_CHANGED_LINES:
             return send(
                 "error",
@@ -481,7 +483,7 @@ def explain_changes(key, build_context, send, gone):
         send(event, payload)
 
     ctx = build_context()
-    files = ctx["files"]
+    files = [f for f in ctx["files"] if not f["generated"]]  # the prompt still lists every changed file
     shown = {
         "instructions": [d["path"] for d in ctx["instructions"]],
         "related": [{k: v for k, v in r.items() if k != "body"} for r in ctx["related"]],

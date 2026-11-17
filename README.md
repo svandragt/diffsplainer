@@ -59,7 +59,7 @@ Opening the same PR again reuses the explanations while its commits stay the sam
 
 Code in the diff is syntax-highlighted for common languages, chosen by file extension.
 
-PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGED_LINES` to change the limit.
+PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGED_LINES` to change the limit. Lockfiles such as `package-lock.json` and `composer.lock` (and, in a local review, files marked `linguist-generated` in `.gitattributes`) show collapsed, are not explained and do not count toward the limit.
 
 ## Configuration
 
@@ -72,7 +72,7 @@ PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGE
 | `CLAUDE_MODEL` | `sonnet` | Model passed to `--model`. The app ignores the model set in your Claude Code settings. |
 | `CLAUDE_CONCURRENCY` | `6` | Parallel Claude calls |
 | `CLAUDE_TIMEOUT_MS` | `240000` | Timeout for each Claude call |
-| `MAX_CHANGED_LINES` | `1000` | Largest PR (additions plus deletions) that gets explanations |
+| `MAX_CHANGED_LINES` | `1000` | Largest PR (additions plus deletions, not counting generated files) that gets explanations |
 
 The app uses only the Python standard library. The browser UI is plain HTML/CSS/JS in `src/diffsplainer/static/`.
 

@@ -274,3 +274,49 @@ def test_load_names_the_repository_directory_and_returns_the_agents_summary(repo
 def test_load_gives_no_summary_when_the_file_has_none_or_a_malformed_one(repo, summary):
     write_review(repo, summary=summary)
     assert local.load(repo.path)["local"]["summary"] is None
+
+
+def test_generated_paths_are_the_files_whose_linguist_generated_attribute_is_set_or_true(repo):
+    (repo.path / ".gitattributes").write_text(
+        "*.gen linguist-generated\n"
+        "dist/* linguist-generated=true\n"
+        "dist/keep.js linguist-generated=false\n"
+        "kept.gen -linguist-generated\n"
+        "*.min.js linguist-generated=maybe\n"
+    )
+    names = [
+        "a.gen",
+        "dist/out.js",
+        "dist/keep.js",
+        "kept.gen",
+        "plain.txt",
+        "x.min.js",
+        'we ird "é".gen',
+        "new\nline.gen",
+    ]
+    assert local.generated_paths(repo.path, names) == {"a.gen", "dist/out.js", 'we ird "é".gen', "new\nline.gen"}
+
+
+def test_generated_paths_is_empty_without_paths_or_attributes(repo):
+    assert local.generated_paths(repo.path, []) == set()
+    assert local.generated_paths(repo.path, ["a.py"]) == set()
+
+
+def test_load_marks_the_lockfiles_and_the_files_marked_generated_and_changes_nothing(repo):
+    (repo.path / ".gitattributes").write_text("*.gen linguist-generated\n")
+    (repo.path / "uv.lock").write_text("x\n" * 5)
+    (repo.path / "out.gen").write_text("y\n")
+    repo.commit("Add generated files")
+    repo.dirty()
+    before = repo.state()
+    files = {f["filename"]: f["generated"] for f in local.load(repo.path)["files"]}
+    assert files == {
+        ".gitattributes": False,
+        "a.py": False,
+        "b.py": False,
+        "drop.txt": False,
+        "gone.txt": False,
+        "out.gen": True,
+        "uv.lock": True,
+    }
+    assert repo.state() == before

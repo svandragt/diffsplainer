@@ -22,10 +22,10 @@ STATUS = {"A": "added", "D": "removed", "R": "renamed"}
 REMOTE_RE = re.compile(r"^(?:\w+://)?(?:[^@/]+@)?([^/:]+)[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 
 
-def run(repo: Path, *args: str) -> subprocess.CompletedProcess:
+def run(repo: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
-            ["git", *args], cwd=repo, capture_output=True, encoding="utf-8", errors="replace", check=False
+            ["git", *args], cwd=repo, input=stdin, capture_output=True, encoding="utf-8", errors="replace", check=False
         )
     except OSError as e:
         raise ValueError(f"Cannot run git in {repo}: {e}") from None
@@ -146,12 +146,21 @@ def tag_chunks(repo: Path, base: str, head: str, commits: list[dict], files: lis
             c["sha"] = shas[i] if 0 <= i < len(shas) else None
 
 
+def generated_paths(repo: Path, names: list[str]) -> set[str]:
+    """The `names` whose `linguist-generated` attribute is set or true, from one `git check-attr`. A failure gives none:
+    the lockfile names still count, and the review goes on."""
+    r = run(repo, "check-attr", "-z", "--stdin", "linguist-generated", stdin="".join(f"{n}\0" for n in names))
+    out = r.stdout.split("\0") if r.returncode == 0 else []
+    return {out[i] for i in range(0, len(out) - 2, 3) if out[i + 2] in ("set", "true")}  # path, attribute, value
+
+
 @lru_cache(maxsize=8)
 def changes(repo: Path, base: str, head: str) -> tuple[list[dict], list[dict]]:
     """The commits and tagged chunks of a range. Cached because the page, the explain stream and every term click load
     them, and blame runs once per file; shas fix the result. Callers must not modify it."""
     commits = list_commits(repo, base, head)
-    files = chunk_files(diff_files(repo, base, head))
+    changed = diff_files(repo, base, head)
+    files = chunk_files(changed, generated_paths(repo, [f["filename"] for f in changed]))
     tag_chunks(repo, base, head, commits, files)
     return commits, files
 
