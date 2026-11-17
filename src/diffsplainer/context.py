@@ -7,6 +7,7 @@ from itertools import zip_longest
 from pathlib import Path
 
 from . import github as gh
+from . import local
 
 ROOT_DOCS = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md", "CONTRIBUTING.md"]
 NESTED_DOCS = {"CLAUDE.md", "AGENTS.md"}
@@ -126,3 +127,12 @@ def related_pulls(owner: str, repo: str, pr: dict, changed: list[str], limit: in
         }
         for e in ranked[:limit]
     ]
+
+
+def local_related_pulls(repo: Path, base: str, changed: list[str], limit: int) -> list[dict]:
+    """`related_pulls` for a local repository whose `origin` is on GitHub, as of the commit `base` that GitHub has.
+    Any failure, such as no origin, no token or a private repository, gives no PRs and does not stop the review."""
+    slug = _safe(local.origin_repo, repo)
+    if not slug:
+        return []
+    return _safe(related_pulls, *slug, {"number": None, "base": {"sha": base}}, changed, limit) or []

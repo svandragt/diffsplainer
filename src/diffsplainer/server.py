@@ -31,7 +31,7 @@ from .claude import (
     explain_overview,
     explain_term,
 )
-from .context import local_instructions, project_instructions, related_pulls
+from .context import local_instructions, local_related_pulls, project_instructions, related_pulls
 from .diff import chunk_files, tree_order
 
 PORT = int(os.environ.get("PORT", "3000"))
@@ -151,6 +151,15 @@ def host_name(host: str) -> str:
     return (name if colon and port.isdigit() else host).lower()
 
 
+def parse_pr_limit(query: dict) -> int:
+    """How many related PRs to read: the `prs` parameter, default 3, from 0 to MAX_PRS."""
+    try:
+        prs = int(query.get("prs", ["3"])[0])
+    except ValueError:
+        prs = 3
+    return max(0, min(MAX_PRS, prs))
+
+
 class ClientGone(Exception):
     pass
 
@@ -204,15 +213,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(405, {"error": "Use POST"})
             if path == "/api/local/explain-term":
                 return self.api_local_explain_term(parse_qs(url.query))
-            return self.api_local() if path == "/api/local" else self.stream(self._explain_local)
+            if path == "/api/local":
+                return self.api_local()
+            limit = parse_pr_limit(parse_qs(url.query))
+            return self.stream(lambda send, gone: self._explain_local(limit, send, gone))
         if m := PR_RE.match(path):
             return self.api_pr(m[1], m[2], int(m[3]))
         if m := EXPLAIN_RE.match(path):
-            try:
-                prs = int(parse_qs(url.query).get("prs", ["3"])[0])
-            except ValueError:
-                prs = 3
-            return self.api_explain(m[1], m[2], int(m[3]), max(0, min(MAX_PRS, prs)))
+            return self.api_explain(m[1], m[2], int(m[3]), parse_pr_limit(parse_qs(url.query)))
         if m := TERM_RE.match(path):
             return self.api_explain_term(m[1], m[2], int(m[3]), parse_qs(url.query))
         return self.static(path)
@@ -421,7 +429,7 @@ class Handler(BaseHTTPRequestHandler):
 
         explain_changes(key, context, send, gone)
 
-    def _explain_local(self, send, gone):
+    def _explain_local(self, pr_limit, send, gone):
         data = local.load(LOCAL_REPO)
         info, files = data["local"], data["files"]
         changed = sum(f["additions"] + f["deletions"] for f in files)
@@ -436,11 +444,16 @@ class Handler(BaseHTTPRequestHandler):
             )
         if not files:
             return send("done", {})
-        key = f"local:{LOCAL_REPO}@{info['base']}..{info['head']}"
+        key = f"local:{LOCAL_REPO}@{info['base']}..{info['head']}:{pr_limit}"
 
         def context():
-            instructions = local_instructions(LOCAL_REPO, [f["filename"] for f in files])
-            return {"local": info, "instructions": instructions, "related": [], "files": files}
+            paths = [f["filename"] for f in files]
+            send("status", {"message": "Loading project instructions and related PRs…"})
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                instr_f = pool.submit(local_instructions, LOCAL_REPO, paths)
+                rel_f = pool.submit(local_related_pulls, LOCAL_REPO, info["merge_base"], paths, pr_limit)
+                instructions, related = instr_f.result(), rel_f.result()
+            return {"local": info, "instructions": instructions, "related": related, "files": files}
 
         explain_changes(key, context, send, gone)
 

@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from diffsplainer import github as gh
 from diffsplainer import local, review
 
 
@@ -203,3 +204,60 @@ def test_load_tags_chunks_in_a_sha256_repository(repo, tmp_path):
     repo.git("commit", "-q", "-am", "Add two", cwd=path)
     head = repo.git("rev-parse", "HEAD", cwd=path)
     assert chunk_shas(local.load(path)) == {"f.txt": {head}}
+
+
+def test_load_names_the_merge_base_with_the_upstream_even_after_a_review_round(repo):
+    assert local.load(repo.path)["local"]["merge_base"] == repo.base
+    review.start_review(repo.path, repo.b)
+    info = local.load(repo.path)["local"]
+    assert (info["base"], info["merge_base"]) == (repo.b, repo.base)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/owner/repo",
+        "https://github.com/owner/repo.git",
+        "https://github.com/owner/repo/",
+        "https://x-access-token:tok@github.com/owner/repo.git",  # betterleaks:allow
+        "git@github.com:owner/repo",
+        "git@github.com:owner/repo.git",
+        "ssh://git@github.com/owner/repo",
+        "ssh://git@github.com/owner/repo.git",
+    ],
+)
+def test_origin_repo_reads_owner_and_repo_from_a_github_remote(repo, url):
+    repo.git("remote", "set-url", "origin", url)
+    assert local.origin_repo(repo.path) == ("owner", "repo")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://gitlab.com/owner/repo.git",
+        "git@bitbucket.org:owner/repo.git",
+        "https://example.com/github.com/owner/repo",
+        "../owner/repo",
+        "/srv/git/owner/repo.git",
+        "https://github.com/owner",
+        "https://github.com/owner/repo/pull/1",
+        "https://github.com/owner/..",
+        "https://github.com/../repo",
+    ],
+)
+def test_origin_repo_is_none_for_a_remote_that_is_not_a_github_repository(repo, url):
+    repo.git("remote", "set-url", "origin", url)
+    assert local.origin_repo(repo.path) is None
+
+
+def test_origin_repo_is_none_without_an_origin(repo):
+    repo.git("remote", "remove", "origin")
+    assert local.origin_repo(repo.path) is None
+
+
+def test_origin_repo_follows_the_github_api_host(repo, monkeypatch):
+    monkeypatch.setattr(gh, "API", "https://ghe.example.com/api/v3")
+    repo.git("remote", "set-url", "origin", "git@ghe.example.com:owner/repo.git")
+    assert local.origin_repo(repo.path) == ("owner", "repo")
+    repo.git("remote", "set-url", "origin", "git@github.com:owner/repo.git")
+    assert local.origin_repo(repo.path) is None

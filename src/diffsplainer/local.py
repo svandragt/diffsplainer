@@ -10,7 +10,7 @@ import subprocess
 from functools import lru_cache
 from pathlib import Path
 
-from . import review
+from . import github, review
 from .diff import chunk_files, tree_order
 
 DEFAULT_REFS = ("refs/remotes/origin/HEAD", "refs/heads/main", "refs/heads/master")
@@ -18,6 +18,8 @@ BLAME_RE = re.compile(
     rf"^({review.SHA_RE.pattern}) \d+ (\d+)", re.MULTILINE
 )  # `--porcelain` entry line: sha, original line, final line
 STATUS = {"A": "added", "D": "removed", "R": "renamed"}
+# https://host/owner/repo.git, git@host:owner/repo.git or ssh://git@host/owner/repo.git
+REMOTE_RE = re.compile(r"^(?:\w+://)?(?:[^@/]+@)?([^/:]+)[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 
 
 def run(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -40,13 +42,32 @@ def is_ancestor(repo: Path, a: str, b: str) -> bool:
     return run(repo, "merge-base", "--is-ancestor", a, b).returncode == 0
 
 
+def origin_repo(repo: Path) -> tuple[str, str] | None:
+    """The owner and name of the repository on GitHub that `origin` points to, or None."""
+    r = run(repo, "remote", "get-url", "origin")
+    m = REMOTE_RE.match(r.stdout.strip()) if r.returncode == 0 else None
+    # `.` and `..` would turn the GitHub API path into a different endpoint
+    if not m or m[1].lower() != github.host() or {m[2], m[3]} & {".", ".."}:
+        return None
+    return m[2], m[3]
+
+
 def current_range(repo: Path) -> tuple[str, str]:
     """The base and HEAD shas of the commits under review."""
+    _, base, head = ranges(repo)
+    return base, head
+
+
+def ranges(repo: Path) -> tuple[str, str, str]:
+    """The merge-base with the upstream, the base of the commits under review, and HEAD.
+
+    The merge-base is the last commit that is on the remote, which the base is not once a review round has been
+    recorded for an unpushed head."""
     head = git(repo, "rev-parse", "HEAD").strip()
     for ref in ("@{upstream}", *DEFAULT_REFS):
         r = run(repo, "merge-base", "HEAD", ref)
         if r.returncode == 0:
-            base = r.stdout.strip()
+            merge_base = base = r.stdout.strip()
             break
     else:
         raise ValueError("The branch has no upstream, and the repository has no default branch to compare it with")
@@ -55,7 +76,7 @@ def current_range(repo: Path) -> tuple[str, str]:
     reviewed = review.last_head(review.read(repo))
     if reviewed and is_ancestor(repo, base, reviewed) and is_ancestor(repo, reviewed, head):
         base = reviewed
-    return base, head
+    return merge_base, base, head
 
 
 def list_commits(repo: Path, base: str, head: str) -> list[dict]:
@@ -137,11 +158,11 @@ def changes(repo: Path, base: str, head: str) -> tuple[list[dict], list[dict]]:
 
 def load(repo: Path) -> dict:
     """The commits under review, their combined diff chunked and tagged with commits, and the review file."""
-    base, head = current_range(repo)
+    merge_base, base, head = ranges(repo)
     commits, files = changes(repo, base, head)
     branch = git(repo, "branch", "--show-current").strip() or "HEAD"
     return {
-        "local": {"branch": branch, "base": base, "head": head, "commits": commits},
+        "local": {"branch": branch, "base": base, "head": head, "merge_base": merge_base, "commits": commits},
         "files": files,
         "review": review.read(repo),
     }

@@ -39,7 +39,7 @@ uvx diffsplainer --local
 uvx diffsplainer --local path/to/repo
 ```
 
-The page lists the commits after the branch's upstream (with no upstream, after the point where the branch left the default branch) and shows them as one diff, with an explanation next to each chunk. Nothing goes to GitHub, and the app never changes the repository's files, index or branches.
+The page lists the commits after the branch's upstream (with no upstream, after the point where the branch left the default branch) and shows them as one diff, with an explanation next to each chunk. When the repository's `origin` is on GitHub, the app reads the earlier merged PRs that changed the same files from GitHub, so Claude can use their reasons. It never writes to GitHub, and it never changes the repository's files, index or branches.
 
 To review, click **Request changes** on a chunk and say what to change. To ask about something you are unsure of, select text in a chunk's diff or explanation. **Explain** shows what a term means, and **Comment** adds your question to the review. The app saves your comments in `diffsplainer/review.json` in the repository's git directory, and the agent reads that file (see `skill/diffsplainer-review`) to answer with fixup commits and replies. Click **Resolve** on an entry when the answer is enough. One button at the end of the review ends the round. While comments are open it reads **Send N comments to agent**. When none is open it reads **Approve all and finish**, which approves every commit shown. The next run then shows only the commits made after that point, plus the entries that are still open.
 

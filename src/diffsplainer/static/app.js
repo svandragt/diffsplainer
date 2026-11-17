@@ -401,7 +401,8 @@ function renderLocal({ local: info, files, review }, recorded) {
   renderReview();
   if (!n) return;
   if (lazy) document.querySelectorAll('.diff[data-lang]').forEach((el) => lazy.observe(el));
-  explain('/api/local/explain');
+  const prs = new URLSearchParams(location.search).get('prs');
+  explain(`/api/local/explain${prs === null ? '' : `?prs=${encodeURIComponent(prs)}`}`);
 }
 
 // Sends one review request. The answer is the new review data, which redraws the commits and the panel.

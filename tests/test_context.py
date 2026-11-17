@@ -1,4 +1,4 @@
-from diffsplainer import context
+from diffsplainer import context, local
 from diffsplainer import github as gh
 
 
@@ -104,3 +104,65 @@ def test_local_instructions_skip_a_file_that_is_not_text_and_a_directory(tmp_pat
     (tmp_path / "AGENTS.md").write_bytes(b"\xff\xfe\x00")
     (tmp_path / "CONTRIBUTING.md").mkdir()
     assert context.local_instructions(tmp_path, ["a.py"]) == []
+
+
+PULL = {
+    "number": 7,
+    "title": "Earlier",
+    "html_url": "https://github.com/o/r/pull/7",
+    "merged_at": "2024-01-02",
+    "body": "Why.",
+}
+
+
+def _github(monkeypatch, commits_for_path=None):
+    """Fake GitHub; returns the list of calls it receives."""
+    calls: list[tuple] = []
+
+    def default(owner, repo, path, ref):
+        return [{"sha": "c1"}]
+
+    def commits(*args):
+        calls.append(args)
+        return (commits_for_path or default)(*args)
+
+    monkeypatch.setattr(gh, "commits_for_path", commits)
+    monkeypatch.setattr(gh, "pulls_for_commit", lambda *_: [PULL])
+    return calls
+
+
+def test_local_related_pulls_asks_the_origin_repository_from_the_given_base(repo, monkeypatch):
+    repo.git("remote", "set-url", "origin", "git@github.com:o/r.git")
+    calls = _github(monkeypatch)
+    related = context.local_related_pulls(repo.path, "base-sha", ["a.py"], 3)
+    assert calls == [("o", "r", "a.py", "base-sha")]
+    assert [(p["number"], p["files"]) for p in related] == [(7, ["a.py"])]
+
+
+def test_local_related_pulls_is_empty_and_calls_nothing_without_a_github_origin(repo, monkeypatch):
+    calls = _github(monkeypatch)
+    assert context.local_related_pulls(repo.path, "b", ["a.py"], 3) == []  # the fixture's origin is a local path
+    repo.git("remote", "remove", "origin")
+    assert context.local_related_pulls(repo.path, "b", ["a.py"], 3) == []
+    assert calls == []
+
+
+def test_local_related_pulls_is_empty_when_github_fails(repo, monkeypatch):
+    repo.git("remote", "set-url", "origin", "git@github.com:o/r.git")
+
+    def fail(*_):
+        raise gh.GitHubError(404, "Not Found")
+
+    _github(monkeypatch, fail)
+    assert context.local_related_pulls(repo.path, "b", ["a.py"], 3) == []
+
+
+def test_local_related_pulls_is_empty_when_the_origin_cannot_be_read(repo, monkeypatch):
+    calls = _github(monkeypatch)
+
+    def fail(*_):
+        raise ValueError("Cannot run git")
+
+    monkeypatch.setattr(local, "run", fail)
+    assert context.local_related_pulls(repo.path, "b", ["a.py"], 3) == []
+    assert calls == []

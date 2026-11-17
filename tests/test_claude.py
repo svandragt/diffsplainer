@@ -267,6 +267,15 @@ def test_context_block_for_local_commits_lists_the_branch_commits_instructions_a
     assert "Pull request #" not in block and "Author:" not in block and "Previous merged PRs" not in block
 
 
+def test_context_block_for_local_commits_lists_related_prs_like_a_pr_does():
+    related = [
+        {"number": 9, "title": "Cache feeds", "merged_at": "2024-01-02T03:04:05Z", "files": ["a.py"], "body": "Why."}
+    ]
+    block = claude.context_block({**LOCAL_CTX, "related": related})
+    assert "# Previous merged PRs touching the same files" in block
+    assert "## #9 Cache feeds (merged 2024-01-02)\nFiles: a.py\nWhy." in block
+
+
 def test_a_chunk_tag_names_the_commit_of_a_local_chunk_only():
     chunk = {"id": "f0c0", "scope": "", "lines": [LINE]}
     assert claude.chunk_tag(chunk).startswith('<chunk id="f0c0">')

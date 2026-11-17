@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from diffsplainer import server
+from diffsplainer import context, server
+from diffsplainer import github as gh
 
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin", "Content-Type": "application/json"}
 
@@ -255,8 +256,8 @@ def fake_claude(monkeypatch):
     return calls
 
 
-def explain_events(serve):
-    status, text = send(serve, "GET", "/api/local/explain")
+def explain_events(serve, query=""):
+    status, text = send(serve, "GET", "/api/local/explain" + query)
     assert status == 200
     blocks = [b.split("\n", 1) for b in text.strip().split("\n\n")]
     return [(e.removeprefix("event: "), json.loads(d.removeprefix("data: "))) for e, d in blocks]
@@ -271,6 +272,99 @@ def test_explaining_local_commits_streams_the_chunks_with_the_commit_context(ser
     assert ctx["local"]["branch"] == "main"
     assert [c["subject"] for c in ctx["local"]["commits"]] == ["Add greeting", "Trim gone.txt and edit b.py"]
     assert ctx["instructions"] == [{"path": "AGENTS.md", "body": "Project rules.\n"}]
+
+
+@pytest.fixture
+def github(local_repo, monkeypatch):
+    """A GitHub origin for the repository, and a fake GitHub that records what it is asked for."""
+    local_repo.git("remote", "set-url", "origin", "git@github.com:o/r.git")
+    calls = SimpleNamespace(commits=[], fail=False)
+
+    def commits_for_path(owner, repo, path, ref):
+        calls.commits.append((owner, repo, path, ref))
+        if calls.fail:
+            raise gh.GitHubError(404, "Not Found")
+        return [{"sha": "c-" + path}]
+
+    pull = {"number": 7, "title": "Earlier work", "html_url": "u", "merged_at": "2024-01-02", "body": "Why."}
+    monkeypatch.setattr(gh, "commits_for_path", commits_for_path)
+    monkeypatch.setattr(gh, "pulls_for_commit", lambda *_: [pull])
+    return calls
+
+
+def context_event(events):
+    return next(p for e, p in events if e == "context")
+
+
+def test_explaining_local_commits_gives_claude_the_earlier_merged_prs_on_the_changed_files(
+    serve, local_repo, fake_claude, github
+):
+    events = explain_events(serve)
+    files = ["a.py", "b.py", "drop.txt", "gone.txt"]
+    pr = {"number": 7, "title": "Earlier work", "url": "u", "merged_at": "2024-01-02", "files": files}
+    assert context_event(events)["related"] == [pr]  # the page gets no body
+    assert fake_claude.files[0][0]["related"] == [{**pr, "body": "Why."}]
+    assert sorted(github.commits) == [("o", "r", f, local_repo.base) for f in files]
+
+
+def test_related_prs_start_at_the_upstream_merge_base_not_at_the_reviewed_head(serve, local_repo, fake_claude, github):
+    assert post(serve, {"action": "start", "head": local_repo.b})[0] == 200
+    (local_repo.path / "new.txt").write_text("n\n")
+    local_repo.commit("fixup! Add greeting")  # the range is now `b..HEAD`, and `b` is not on GitHub
+    explain_events(serve)
+    assert github.commits == [("o", "r", "new.txt", local_repo.base)]
+
+
+@pytest.mark.parametrize("origin", ["https://gitlab.com/o/r.git", "/srv/git/r.git"])
+def test_local_commits_with_a_non_github_origin_have_no_related_prs_and_ask_github_nothing(
+    serve, local_repo, fake_claude, github, origin
+):
+    local_repo.git("remote", "set-url", "origin", origin)
+    assert context_event(explain_events(serve))["related"] == []
+    assert github.commits == []
+
+
+def test_local_commits_without_an_origin_have_no_related_prs_and_ask_github_nothing(
+    serve, local_repo, fake_claude, github
+):
+    local_repo.git("switch", "-q", "-c", "feature")
+    local_repo.git("branch", "-f", "main", local_repo.base)  # without an origin the range starts at main
+    local_repo.git("remote", "remove", "origin")
+    assert context_event(explain_events(serve))["related"] == []
+    assert github.commits == []
+
+
+def test_prs_zero_asks_github_nothing(serve, local_repo, fake_claude, github):
+    assert context_event(explain_events(serve, "?prs=0"))["related"] == []
+    assert github.commits == []
+
+
+@pytest.mark.parametrize(
+    "query, limit",
+    [("", 3), ("?prs=5", 5), ("?prs=99", server.MAX_PRS), ("?prs=-2", 0), ("?prs=x", 3)],
+)
+def test_the_prs_parameter_sets_the_related_pr_limit_like_it_does_for_a_pr(
+    serve, local_repo, fake_claude, github, monkeypatch, query, limit
+):
+    seen = []
+    monkeypatch.setattr(context, "related_pulls", lambda *args: seen.append(args[-1]) or [])
+    explain_events(serve, query)
+    assert seen == [limit]
+
+
+def test_a_different_prs_limit_gets_new_explanations(serve, local_repo, fake_claude, github):
+    explain_events(serve, "?prs=3")
+    explain_events(serve, "?prs=0")
+    assert len(fake_claude.files) == 4 + 4
+    explain_events(serve, "?prs=0")
+    assert len(fake_claude.files) == 4 + 4
+
+
+def test_a_github_failure_leaves_local_commits_explained_without_related_prs(serve, local_repo, fake_claude, github):
+    github.fail = True
+    events = explain_events(serve)
+    assert context_event(events)["related"] == []
+    assert [e for e, _ in events].count("chunk") == 4 and events[-1] == ("done", {})
 
 
 def test_a_second_explain_of_the_same_base_and_head_is_served_from_the_cache(serve, local_repo, fake_claude):
