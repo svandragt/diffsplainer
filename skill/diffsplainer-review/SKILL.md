@@ -1,11 +1,11 @@
 ---
 name: diffsplainer-review
-description: Answer the review comments a person left on unpushed commits in Diffsplainer. Use when asked to address Diffsplainer review comments, or when the repo's diffsplainer/review.json has open entries.
+description: Start Diffsplainer so a person can review your unpushed commits, then answer the comments they leave. Use when you have listed unpushed commits for the person's review, when asked to address Diffsplainer review comments, or when the repo's diffsplainer/review.json has open entries.
 ---
 
 # Answer Diffsplainer review comments
 
-A person reviews your unpushed commits with `diffsplainer --local`. They request changes on a chunk or ask a question about selected text, then send the comments to you or approve all the commits. Diffsplainer writes these to a JSON file in the repo's git directory. You answer each open entry with a fixup commit or a reply, then wait for the next review.
+A person reviews your unpushed commits with `diffsplainer --local`. They request changes on a chunk or ask a question about selected text, then send the comments to you or approve all the commits. Diffsplainer writes these to a JSON file in the repo's git directory. You start Diffsplainer for the person, answer each open entry with a fixup commit or a reply, then wait for the next review.
 
 ## Find the review file
 
@@ -51,7 +51,25 @@ If the file does not exist, there are no comments.
 3. For a `question` entry, set `reply` to the answer.
 4. Read the file again just before writing, because Diffsplainer may have added an entry or changed a status in the meantime. Change only `reply` on the entries you answered.
 5. Write the whole file to a temporary file in the same directory, then rename it over `review.json`.
-6. List the new commits with `git log --oneline <last reviews[].head>..HEAD`, and wait for the next review.
+6. List the new commits with `git log --oneline <last reviews[].head>..HEAD`, and wait for the next review. The page shows them when the person reloads it.
+
+## Start the review
+
+When you list your unpushed commits for the person's review, start Diffsplainer yourself in the background, then start the wait below straight away. Do not ask the person to start it, and do not wait for them to say they have reviewed.
+
+```sh
+gd="$(git rev-parse --absolute-git-dir)"; mkdir -p "$gd/diffsplainer"
+if command -v diffsplainer >/dev/null; then app=diffsplainer; else app="uvx diffsplainer"; fi
+for port in $(seq 3000 3020); do
+  PORT=$port nohup $app --local >"$gd/diffsplainer/server.log" 2>&1 &
+  sleep 3
+  if kill -0 $! 2>/dev/null; then echo $! >"$gd/diffsplainer/server.pid"; echo "http://localhost:$port"; break; fi
+done
+```
+
+The app opens the page in the browser. Give the person the URL as well. A port that another app uses makes the start fail, so the loop tries the next one. If no port works, show the person the end of `server.log`.
+
+When the person approves, stop the server: `kill "$(cat "$gd/diffsplainer/server.pid")"`.
 
 ## Wait for the next review
 
@@ -68,7 +86,7 @@ until [ "$(count)" -gt "$n" ]; do sleep 20; done
 
 Run it with your harness's background wait, so you use nothing while you wait; in Claude Code, that is the Monitor tool. A file that is missing or mid-write counts as -1, so the wait continues. Comments the person adds before they end the round are part of that round: answer them after the wait returns, not as they appear.
 
-When the wait returns, check for approval first. The round's commits are `git log --format=%H <previous reviews[].head>..<newest reviews[].head>`, or all unpushed commits in the first round. If the newest round has no entry with `status` `open` and every commit of the round is in `approved`, the person approved the work. Stop waiting and tell the person the commits are approved and ready for them to rebase and push. Otherwise start again at step 1.
+When the wait returns, check for approval first. The round's commits are `git log --format=%H <previous reviews[].head>..<newest reviews[].head>`, or all unpushed commits in the first round. If the newest round has no entry with `status` `open` and every commit of the round is in `approved`, the person approved the work. Stop waiting, stop the server you started, and tell the person the commits are approved and ready for them to rebase and push. Otherwise start again at step 1.
 
 ## Rules
 
