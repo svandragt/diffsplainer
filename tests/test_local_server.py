@@ -126,6 +126,14 @@ def test_start_with_approve_over_http_records_one_round_and_approves_every_commi
     assert [r["head"] for r in got["reviews"]] == [local_repo.b]
 
 
+def test_start_with_approve_over_http_approves_only_the_commits_up_to_the_head_the_page_sent(serve, local_repo):
+    # the page showed the range up to `a`; the agent committed `b` after it loaded
+    assert post(serve, {"action": "start", "head": local_repo.a, "approve": True})[0] == 200
+    got = review_file(local_repo)
+    assert got["approved"] == [local_repo.a]
+    assert [r["head"] for r in got["reviews"]] == [local_repo.a]
+
+
 def test_start_without_approve_over_http_approves_nothing(serve, local_repo):
     assert post(serve, {"action": "start", "head": local_repo.b})[0] == 200
     assert review_file(local_repo)["approved"] == []

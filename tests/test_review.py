@@ -15,7 +15,7 @@ def read(repo):
 
 def entry(repo, **over):
     req = {"action": "change", "sha": repo.a, "file": "a.py", "lines": "11-12", "diff": "+added1", "body": "Why?"}
-    return review.apply(repo.path, {**req, **over}, {repo.a, repo.b})
+    return review.apply(repo.path, {**req, **over}, [repo.a, repo.b])
 
 
 def test_the_review_file_is_in_the_git_dir(repo):
@@ -51,7 +51,7 @@ def test_start_review_records_the_head_and_the_time(repo):
 
 
 def test_start_with_approve_records_the_round_and_approves_every_commit_once(repo):
-    shas = {repo.a, repo.b}
+    shas = [repo.a, repo.b]
     review.apply(repo.path, {"action": "start", "head": repo.b}, shas)
     assert read(repo)["approved"] == []  # a plain start approves nothing
     review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, shas)
@@ -61,9 +61,14 @@ def test_start_with_approve_records_the_round_and_approves_every_commit_once(rep
     assert [r["head"] for r in got["reviews"]] == [repo.b] * 3
 
 
+def test_start_with_approve_approves_only_the_commits_up_to_the_head_it_names(repo):
+    review.apply(repo.path, {"action": "start", "head": repo.a, "approve": True}, [repo.a, repo.b])
+    assert read(repo)["approved"] == [repo.a]
+
+
 def test_start_with_approve_keeps_what_was_approved_before(repo):
     review.update(repo.path, lambda d: d["approved"].append(repo.base))
-    review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, {repo.a, repo.b})
+    review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, [repo.a, repo.b])
     assert read(repo)["approved"][0] == repo.base
 
 
@@ -71,20 +76,20 @@ def test_start_with_approve_is_refused_while_an_entry_is_open_and_writes_nothing
     entry(repo)
     before = review.path(repo.path).read_text()
     with pytest.raises(ValueError, match="open"):
-        review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, {repo.a, repo.b})
+        review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, [repo.a, repo.b])
     assert review.path(repo.path).read_text() == before
 
 
 def test_start_with_approve_is_allowed_when_every_entry_is_resolved(repo):
     entry(repo)
-    review.apply(repo.path, {"action": "status", "id": "r1", "status": "resolved"}, set())
-    review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, {repo.a, repo.b})
+    review.apply(repo.path, {"action": "status", "id": "r1", "status": "resolved"}, [])
+    review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, [repo.a, repo.b])
     assert sorted(read(repo)["approved"]) == sorted([repo.a, repo.b])
 
 
 def test_start_without_approve_is_allowed_while_an_entry_is_open(repo):
     entry(repo)
-    review.apply(repo.path, {"action": "start", "head": repo.b}, {repo.a, repo.b})
+    review.apply(repo.path, {"action": "start", "head": repo.b}, [repo.a, repo.b])
     assert len(read(repo)["reviews"]) == 1
 
 
@@ -144,10 +149,10 @@ def test_entry_ids_count_up_and_skip_ids_that_exist(repo):
 
 def test_resolving_an_entry_sets_its_status_and_leaves_the_rest(repo):
     entry(repo)
-    review.apply(repo.path, {"action": "status", "id": "r1", "status": "resolved"}, set())
+    review.apply(repo.path, {"action": "status", "id": "r1", "status": "resolved"}, [])
     got = read(repo)["entries"][0]
     assert (got["status"], got["body"]) == ("resolved", "Why?")
-    review.apply(repo.path, {"action": "status", "id": "r1", "status": "open"}, set())
+    review.apply(repo.path, {"action": "status", "id": "r1", "status": "open"}, [])
     assert read(repo)["entries"][0]["status"] == "open"
 
 
@@ -175,26 +180,26 @@ def test_a_bad_request_is_a_value_error_and_writes_nothing(repo, req):
     review.start_review(repo.path, repo.a)
     before = review.path(repo.path).read_text()
     with pytest.raises(ValueError):
-        review.apply(repo.path, req, {"a" * 40})
+        review.apply(repo.path, req, ["a" * 40])
     assert review.path(repo.path).read_text() == before
 
 
 def test_start_names_the_head_and_the_head_must_be_in_the_range(repo):
-    review.apply(repo.path, {"action": "start", "head": repo.b}, {repo.a, repo.b})
+    review.apply(repo.path, {"action": "start", "head": repo.b}, [repo.a, repo.b])
     assert [r["head"] for r in read(repo)["reviews"]] == [repo.b]
     with pytest.raises(ValueError):
-        review.apply(repo.path, {"action": "start", "head": "--output=x"}, {repo.a, repo.b})
+        review.apply(repo.path, {"action": "start", "head": "--output=x"}, [repo.a, repo.b])
 
 
 def test_an_empty_range_takes_the_current_head_for_a_round_and_a_general_comment_only(repo):
-    review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, set(), repo.b)
+    review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, [], repo.b)
     general = {"action": "change", "sha": repo.b, "file": "", "lines": "", "diff": "", "body": "Split this up."}
-    review.apply(repo.path, general, set(), repo.b)
+    review.apply(repo.path, general, [], repo.b)
     got = read(repo)
     assert (got["approved"], [r["head"] for r in got["reviews"]], len(got["entries"])) == ([], [repo.b], 1)
     for req in ({"action": "start", "head": repo.a}, {**general, "sha": repo.a}, {**general, "file": "a.py"}):
         with pytest.raises(ValueError):
-            review.apply(repo.path, req, set(), repo.b)
+            review.apply(repo.path, req, [], repo.b)
 
 
 def test_a_write_keeps_a_reply_the_agent_wrote_after_the_page_loaded(repo):
@@ -203,7 +208,7 @@ def test_a_write_keeps_a_reply_the_agent_wrote_after_the_page_loaded(repo):
     data = read(repo)
     data["entries"][0]["reply"] = "Fixed in a fixup."
     review.path(repo.path).write_text(json.dumps(data))  # the agent answers
-    review.apply(repo.path, {"action": "start", "head": repo.b}, {repo.b})
+    review.apply(repo.path, {"action": "start", "head": repo.b}, [repo.b])
     got = read(repo)
     assert got["entries"][0]["reply"] == "Fixed in a fixup."
     assert [r["head"] for r in got["reviews"]] == [repo.b]
@@ -215,7 +220,7 @@ def test_a_write_keeps_fields_it_does_not_know(repo):
     data["extra"] = {"keep": True}
     data["entries"][0]["note"] = "agent note"
     review.path(repo.path).write_text(json.dumps(data))
-    review.apply(repo.path, {"action": "status", "id": "r1", "status": "resolved"}, set())
+    review.apply(repo.path, {"action": "status", "id": "r1", "status": "resolved"}, [])
     got = read(repo)
     assert got["extra"] == {"keep": True}
     assert got["entries"][0]["note"] == "agent note"
@@ -226,7 +231,7 @@ def test_a_file_that_is_not_a_review_is_an_error_and_is_left_alone(repo, text):
     review.path(repo.path).parent.mkdir()
     review.path(repo.path).write_text(text)
     with pytest.raises(review.ReviewError):
-        review.apply(repo.path, {"action": "start", "head": repo.a, "approve": True}, {repo.a})
+        review.apply(repo.path, {"action": "start", "head": repo.a, "approve": True}, [repo.a])
     with pytest.raises(review.ReviewError):
         review.start_review(repo.path, repo.a)
     assert review.path(repo.path).read_text() == text
@@ -357,5 +362,5 @@ def test_a_write_keeps_the_agents_summary(repo):
     review.path(repo.path).parent.mkdir()
     review.path(repo.path).write_text(json.dumps({"summary": summary}))
     entry(repo)
-    review.apply(repo.path, {"action": "start", "head": repo.b}, {repo.b})
+    review.apply(repo.path, {"action": "start", "head": repo.b}, [repo.b])
     assert read(repo)["summary"] == summary

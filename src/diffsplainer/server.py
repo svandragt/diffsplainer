@@ -275,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             try:
                 base, head = local.current_range(LOCAL_REPO)
-                shas = {c["sha"] for c in local.list_commits(LOCAL_REPO, base, head)}
+                shas = [c["sha"] for c in local.list_commits(LOCAL_REPO, base, head)]
             except ValueError as e:  # git failed: not the request's fault
                 return self.send_json(500, {"error": str(e)})
             data = review.apply(LOCAL_REPO, req, shas, head)

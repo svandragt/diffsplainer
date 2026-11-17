@@ -168,8 +168,9 @@ def set_status(repo: Path, entry_id, status) -> dict:
     return update(repo, change)
 
 
-def apply(repo: Path, req, shas: set[str], head: str | None = None) -> dict:
-    """Run one request from the page. `shas` are the commits under review: the only ones a request may name. `head` is
+def apply(repo: Path, req, shas: list[str], head: str | None = None) -> dict:
+    """Run one request from the page. `shas` are the commits under review, oldest first: the only ones a request may
+    name. Approving covers those up to the head the page sent, not a commit made after it loaded. `head` is
     the current HEAD, which also names a round's head and a general comment's commit: an agent that replies without
     committing leaves `shas` empty, and the round still has to end."""
     if not isinstance(req, dict):
@@ -187,7 +188,8 @@ def apply(repo: Path, req, shas: set[str], head: str | None = None) -> dict:
         approve = req.get("approve", False)
         if not isinstance(approve, bool):
             raise ValueError("approve must be true or false")
-        return start_review(repo, sha, sorted(shas) if approve else None)
+        shown = shas[: shas.index(sha) + 1] if sha in shas else []  # empty range: nothing to approve
+        return start_review(repo, sha, shown if approve else None)
     fields = {k: req.get(k) for k in _ENTRY_FIELDS}
     if not all(isinstance(v, str) for v in fields.values()) or not fields["body"].strip():
         raise ValueError("file, lines, diff and body must be strings, and body must not be empty")
