@@ -14,17 +14,20 @@ API = os.environ.get("GITHUB_API", "https://api.github.com").rstrip("/")
 FILES_MAX_PAGES = 30  # GitHub lists at most 3000 files (30 pages of 100) per PR
 
 
+def host() -> str:
+    """The host the API serves, as git remotes and `gh auth` name it."""
+    name = urllib.parse.urlsplit(API).hostname
+    return "github.com" if name in (None, "api.github.com") else name
+
+
 @functools.cache
 def _token() -> str:
     env = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if env:
         return env
-    host = urllib.parse.urlsplit(API).hostname
-    if host == "api.github.com":
-        host = "github.com"
     try:
         res = subprocess.run(
-            ["gh", "auth", "token", "--hostname", host or "github.com"],
+            ["gh", "auth", "token", "--hostname", host()],
             capture_output=True,
             text=True,
             timeout=5,

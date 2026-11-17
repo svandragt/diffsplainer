@@ -30,6 +30,21 @@ To open any GitHub PR with one click, drag the Diffsplain link from the start pa
 
 The address bar always shows the PR you're reviewing, so links can be shared. To change how many related PRs Claude reads, add `?prs=N` (0–10, default 3) to the address.
 
+## Review unpushed commits
+
+To review commits that an agent made and has not pushed, run the app inside the repository, or give it the path:
+
+```sh
+uvx diffsplainer --local
+uvx diffsplainer --local path/to/repo
+```
+
+The page lists the commits after the branch's upstream (with no upstream, after the point where the branch left the default branch) and shows them as one diff, with an explanation next to each chunk. When the repository's `origin` is on GitHub, the app reads the earlier merged PRs that changed the same files from GitHub, so Claude can use their reasons. It never writes to GitHub, and it never changes the repository's files, index or branches.
+
+The page opens with the agent's summary of the work (a title, the ticket and a short description) when the agent has written one, and Claude reads it with the commit messages. When the branch has a plan file (`approach/<branch>.md` in the repository's git directory, or the file the agent names in its summary), Claude reads that too, and the context panel names it. The overview lists where the agent's summary or the commits differ from the plan, or where the commits do not support the summary when there is no plan.
+
+To review, click **Request changes** on a chunk and say what to change. To ask about something you are unsure of, select text in a chunk's diff or explanation. **Explain** shows what a term means, and **Comment** adds your question to the review. The app saves your comments in `diffsplainer/review.json` in the repository's git directory, and the agent reads that file (see `skill/diffsplainer-review`) to answer with fixup commits and replies. To comment on the work as a whole, type in the **General comment** box above the button at the end of the review; it counts as one comment when you send. Click **Resolve** on an entry when the answer is enough. One button at the end of the review ends the round. While comments are open it reads **Send N comments to agent**. When none is open it reads **Approve all and finish**, which approves every commit shown. The next run then shows only the commits made after that point, plus the entries that are still open.
+
 ## How it works
 
 The app fetches the PR from GitHub and splits each file's diff into chunks. Claude Code explains each chunk, and the explanation appears next to the chunk as soon as it is ready.
@@ -44,7 +59,7 @@ Opening the same PR again reuses the explanations while its commits stay the sam
 
 Code in the diff is syntax-highlighted for common languages, chosen by file extension.
 
-PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGED_LINES` to change the limit.
+PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGED_LINES` to change the limit. Lockfiles such as `package-lock.json` and `composer.lock` (and, in a local review, files marked `linguist-generated` in `.gitattributes`) show collapsed, are not explained and do not count toward the limit.
 
 ## Configuration
 
@@ -57,7 +72,7 @@ PRs over 1,000 changed lines show the diff without explanations. Set `MAX_CHANGE
 | `CLAUDE_MODEL` | `sonnet` | Model passed to `--model`. The app ignores the model set in your Claude Code settings. |
 | `CLAUDE_CONCURRENCY` | `6` | Parallel Claude calls |
 | `CLAUDE_TIMEOUT_MS` | `240000` | Timeout for each Claude call |
-| `MAX_CHANGED_LINES` | `1000` | Largest PR (additions plus deletions) that gets explanations |
+| `MAX_CHANGED_LINES` | `1000` | Largest PR (additions plus deletions, not counting generated files) that gets explanations |
 
 The app uses only the Python standard library. The browser UI is plain HTML/CSS/JS in `src/diffsplainer/static/`.
 

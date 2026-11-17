@@ -18,7 +18,9 @@ CHUNKS = [{"id": f"f0c{i}", "scope": "", "lines": [{"t": "add", "o": None, "n": 
 def make_pr(base: str = "b1", head: str = "h1", additions: int = 10, deletions: int = 5) -> dict:
     return {
         "pr": {"number": 1, "baseSha": base, "headSha": head, "additions": additions, "deletions": deletions},
-        "files": [{"filename": "a.py", "chunks": CHUNKS}],
+        "files": [
+            {"filename": "a.py", "generated": False, "additions": additions, "deletions": deletions, "chunks": CHUNKS}
+        ],
         "_raw": {},
     }
 
@@ -105,6 +107,52 @@ def test_pr_at_the_line_cap_is_explained(explain, monkeypatch):
     assert len(explain.calls) == 1
 
 
+def add_lockfile(pr: dict, additions: int, deletions: int):
+    """A generated file in the PR, counted in the PR's own totals like GitHub counts it."""
+    chunks = [{**c, "id": c["id"].replace("f0", "f1")} for c in CHUNKS]
+    lock = {"filename": "package-lock.json", "generated": True, "additions": additions, "deletions": deletions}
+    pr["files"].append({**lock, "chunks": chunks})
+    pr["pr"]["additions"] += additions
+    pr["pr"]["deletions"] += deletions
+
+
+def test_generated_lines_do_not_count_toward_the_line_cap(explain, monkeypatch):
+    monkeypatch.setattr(server, "MAX_CHANGED_LINES", 1000)
+    explain.pr = make_pr(additions=300, deletions=47)
+    add_lockfile(explain.pr, additions=2000, deletions=136)  # 2,483 lines in all, 347 of them not generated
+    assert explain.run()[-1][0] == "done"
+    assert [f["filename"] for f in explain.calls] == ["a.py"]
+
+
+def test_other_lines_over_the_line_cap_are_still_refused_when_a_lockfile_is_in_the_pr(explain, monkeypatch):
+    monkeypatch.setattr(server, "MAX_CHANGED_LINES", 1000)
+    explain.pr = make_pr(additions=1000, deletions=1)
+    add_lockfile(explain.pr, additions=5, deletions=0)
+    events = explain.run()
+    assert [(e, p["scope"]) for e, p in events] == [("error", "limit")] and "changes 1001 lines" in events[0][1][
+        "message"
+    ]
+    assert not explain.calls
+
+
+def test_a_generated_file_is_not_explained_and_not_in_the_overview_excerpt(explain):
+    add_lockfile(explain.pr, additions=20, deletions=0)
+    events = explain.run()
+    assert [f["filename"] for f in explain.calls] == ["a.py"]
+    assert [[f["filename"] for f in files] for files in explain.overviews] == [["a.py"]]
+    assert {p["id"] for e, p in events if e == "chunk"} == set(explain.ids)  # none for f1c0 and f1c1
+    assert events[-1][0] == "done" and len(server._explain_cache) == 1
+
+
+def test_load_pr_marks_a_lockfile_as_generated_by_its_name(monkeypatch):
+    server._pr_cache.clear()
+    _stub_github(monkeypatch)
+    names = ["web/package-lock.json", "src/a.py"]
+    monkeypatch.setattr(server.gh, "get_pull_files", lambda *_: [{"filename": n} for n in names])
+    files = server.load_pr("o", "r", 1)["files"]
+    assert {f["filename"]: f["generated"] for f in files} == {"web/package-lock.json": True, "src/a.py": False}
+
+
 def test_explain_calls_receive_the_disconnect_event(explain):
     explain.run()
     assert explain.cancels == [explain.gone]
@@ -113,7 +161,10 @@ def test_explain_calls_receive_the_disconnect_event(explain):
 
 def test_disconnect_stops_queued_batches_without_error_events_or_caching(explain, monkeypatch):
     monkeypatch.setattr(server, "CONCURRENCY", 1)
-    explain.pr["files"] = [{"filename": n, "chunks": [{**CHUNKS[0], "id": n}]} for n in ("a.py", "b.py")]
+    explain.pr["files"] = [
+        {"filename": n, "generated": False, "additions": 0, "deletions": 0, "chunks": [{**CHUNKS[0], "id": n}]}
+        for n in ("a.py", "b.py")
+    ]
     explain.disconnect = True
     events = explain.run()
     assert len(explain.calls) == 1

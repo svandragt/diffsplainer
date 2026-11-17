@@ -32,4 +32,6 @@ elif "chunks" in props:
     }
 else:
     out = {"summary": "Fake summary.", "approach": "Fake approach.", "review_focus": ["Fake focus."]}
+    if "checks" in props:
+        out["checks"] = ["Fake check."]
 print(json.dumps({"is_error": False, "structured_output": out}))

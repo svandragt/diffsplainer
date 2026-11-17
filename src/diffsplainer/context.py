@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from itertools import zip_longest
+from pathlib import Path
 
 from . import github as gh
+from . import local
 
 ROOT_DOCS = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md", "CONTRIBUTING.md"]
 NESTED_DOCS = {"CLAUDE.md", "AGENTS.md"}
@@ -13,6 +16,8 @@ MAX_DOC_CHARS = 6000
 MAX_TOTAL_DOC_CHARS = 20000
 MAX_PATHS = 8  # changed files we look up history for
 MAX_SHAS = 12  # commits we map back to PRs
+MAX_PLAN_CHARS = 8000
+TICKET_KEY_RE = re.compile(r"(?:[A-Z][A-Z0-9]+-\d+|\d+)(?=-|$)")  # `BH-740` or `1234` at the start of a branch name
 
 
 def clip(s: str | None, n: int) -> str:
@@ -27,18 +32,12 @@ def _safe(fn, *args):
         return None
 
 
-def project_instructions(owner: str, repo: str, ref: str, changed: list[str]) -> list[dict]:
-    wanted = list(ROOT_DOCS)
-    # Nested CLAUDE.md / AGENTS.md in directories that contain changed files.
-    tree = _safe(gh.get_tree, owner, repo, ref)
-    if tree and tree.get("tree"):
-        dirs = {"/".join(p.split("/")[:i]) for p in changed for i in range(1, p.count("/") + 1)}
-        for node in tree["tree"]:
-            d, _, base = node["path"].rpartition("/")
-            if node["type"] == "blob" and base in NESTED_DOCS and d in dirs:
-                wanted.append(node["path"])
-    wanted.append("README.md")  # last, so the fallback check below sees the nested files too
+def _changed_dirs(changed: list[str]) -> set[str]:
+    return {"/".join(p.split("/")[:i]) for p in changed for i in range(1, p.count("/") + 1)}
 
+
+def _read_docs(wanted: list[str], read) -> list[dict]:
+    """Read each of `wanted` with `read(path)` (None when missing), within the size caps. `wanted` ends with README.md."""
     docs: list[dict] = []
     total = 0
     for path in wanted:
@@ -47,13 +46,81 @@ def project_instructions(owner: str, repo: str, ref: str, changed: list[str]) ->
         # README is only a fallback when there are no real instruction files.
         if path == "README.md" and docs:
             continue
-        text = _safe(gh.get_file, owner, repo, path, ref)
+        text = read(path)
         if not text:
             continue
         body = clip(text, min(MAX_DOC_CHARS, MAX_TOTAL_DOC_CHARS - total))
         total += len(body)
         docs.append({"path": path, "body": body})
     return docs
+
+
+def project_instructions(owner: str, repo: str, ref: str, changed: list[str]) -> list[dict]:
+    wanted = list(ROOT_DOCS)
+    # Nested CLAUDE.md / AGENTS.md in directories that contain changed files.
+    tree = _safe(gh.get_tree, owner, repo, ref)
+    if tree and tree.get("tree"):
+        dirs = _changed_dirs(changed)
+        for node in tree["tree"]:
+            d, _, base = node["path"].rpartition("/")
+            if node["type"] == "blob" and base in NESTED_DOCS and d in dirs:
+                wanted.append(node["path"])
+    wanted.append("README.md")  # last, so the fallback check sees the nested files too
+    return _read_docs(wanted, lambda path: _safe(gh.get_file, owner, repo, path, ref))
+
+
+def local_instructions(repo: Path, changed: list[str]) -> list[dict]:
+    """`project_instructions` for a local repository: the files are read from its work tree."""
+
+    def read(path: str) -> str | None:
+        file = (repo / path).resolve()
+        if not file.is_relative_to(repo.resolve()) or not file.is_file():  # a symlink may point at any file
+            return None
+        try:
+            return file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    nested = [f"{d}/{name}" for d in sorted(_changed_dirs(changed)) for name in sorted(NESTED_DOCS)]
+    return _read_docs([*ROOT_DOCS, *nested, "README.md"], read)
+
+
+def _plan_text(file: Path) -> str | None:
+    try:
+        text = file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return text if text.strip() else None
+
+
+def _named_plan(repo: Path, path: str) -> dict | None:
+    """The plan at `path` (`~` expanded, relative to the work tree), if it is a readable `.md` file. The extension is
+    checked on the real path, so a `.md` symlink to another kind of file is refused."""
+    file = (repo / Path(path).expanduser()).resolve()
+    text = _plan_text(file) if file.suffix == ".md" and file.is_file() else None
+    return {"name": file.name, "body": clip(text, MAX_PLAN_CHARS)} if text else None
+
+
+def local_plan(repo: Path, branch: str, summary: dict | None = None) -> dict | None:
+    """The plan for `branch` as `{name, body}` (body clipped), or None.
+
+    The file `summary["plan"]` names comes first. Otherwise it is in the git directory's `approach/` folder: `<branch>.md`,
+    else `<ticket key>.md` when the branch starts with a ticket key. A `*.ticket.md` or `*-pr.md` file is not a plan. A
+    candidate whose real path is outside `approach/` is refused."""
+    named = (summary or {}).get("plan")
+    if isinstance(named, str) and (plan := _safe(_named_plan, repo, named)):
+        return plan
+    if branch == "HEAD":  # detached: `load` reports it so, and git refuses a branch with that name
+        return None
+    approach = (Path(local.git(repo, "rev-parse", "--absolute-git-dir").strip()) / "approach").resolve()
+    key = TICKET_KEY_RE.match(branch)
+    for name in [branch, *([key[0]] if key else [])]:
+        file = (approach / f"{name}.md").resolve()
+        if name.endswith(("-pr", ".ticket")) or not file.is_relative_to(approach) or not file.is_file():
+            continue
+        if text := _plan_text(file):
+            return {"name": f"{name}.md", "body": clip(text, MAX_PLAN_CHARS)}
+    return None
 
 
 def _round_robin_shas(commit_lists: list[list[dict]], limit: int) -> list[str]:
@@ -101,3 +168,12 @@ def related_pulls(owner: str, repo: str, pr: dict, changed: list[str], limit: in
         }
         for e in ranked[:limit]
     ]
+
+
+def local_related_pulls(repo: Path, base: str, changed: list[str], limit: int) -> list[dict]:
+    """`related_pulls` for a local repository whose `origin` is on GitHub, as of the commit `base` that GitHub has.
+    Any failure, such as no origin, no token or a private repository, gives no PRs and does not stop the review."""
+    slug = _safe(local.origin_repo, repo)
+    if not slug:
+        return []
+    return _safe(related_pulls, *slug, {"number": None, "base": {"sha": base}}, changed, limit) or []
