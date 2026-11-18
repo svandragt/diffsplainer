@@ -17,7 +17,7 @@ If the file does not exist, there are no comments.
 
 ```json
 {
-  "reviews": [{"head": "<sha>", "at": "<ISO time>"}],
+  "reviews": [{"head": "<sha>", "at": "<ISO time>", "push": true}],
   "approved": ["<commit sha>"],
   "summary": {"title": "<what the commits do>", "ticket": "<key or URL, or null>", "body": "<the goal and the approach>", "plan": "<absolute path to the plan, or null>"},
   "entries": [
@@ -46,7 +46,8 @@ If the file does not exist, there are no comments.
 - `reply` is `null` until you answer.
 - `summary` is yours, and it is optional. The page shows it at the top, and Claude reads it as the description of the work. Each field is a string or `null`.
 - `summary.plan` is optional: the absolute path to the plan, a `.md` file, when the plan is not `approach/<branch>.md` in this repo's git directory (a plan shared with another repo, for example). Diffsplainer reads it before `approach/<branch>.md`, and uses the branch file when `plan` is not an existing, readable `.md` file. It counts only next to a `title`, `ticket` or `body`.
-- `reviews` lists the HEAD of each review round. `approved` lists approved commits. Diffsplainer fills it only when the person clicks "Approve all and finish", which adds every commit of that round at once and is possible only when no entry is open.
+- `reviews` lists the HEAD of each review round. `approved` lists approved commits. Diffsplainer fills it only when the person clicks "Approve" or "Approve and push", which adds every commit of that round at once and is possible only when no entry is open.
+- `push` is `true` on a round the person ended with "Approve and push", and is absent on every other round. It allows you to push that round's head once the checks in "Push after approval" pass.
 
 ## Protocol
 
@@ -102,7 +103,7 @@ When the person approves, stop the server: `kill "$(cat "$gd/diffsplainer/server
 
 ## Wait for the next review
 
-The person ends a round with one button, "Send N comments to agent" or "Approve all and finish", and Diffsplainer then adds an item to `reviews`. Nothing else tells you, so watch the file instead of waiting for the person to tell you. The same wait applies before the first review.
+The person ends a round with "Send N comments to agent", "Approve" or "Approve and push", and Diffsplainer then adds an item to `reviews`. Nothing else tells you, so watch the file instead of waiting for the person to tell you. The same wait applies before the first review.
 
 Wait until `reviews` has more items than the number in `reviews.seen`, which you recorded before you started the server. When the wait returns, it writes its own count there, so a round that the person ends while you answer is not missed by the next wait:
 
@@ -116,12 +117,34 @@ echo "$c" >"$gd/diffsplainer/reviews.seen"
 
 Run it with your harness's background wait, so you use nothing while you wait; in Claude Code, that is the Monitor tool. A file that is missing or mid-write counts as -1, so the wait continues. Comments the person adds before they end the round are part of that round: answer them after the wait returns, not as they appear.
 
-When the wait returns, check for approval first. The round's commits are `git log --format=%H <previous reviews[].head>..<newest reviews[].head>`, or all unpushed commits in the first round. If the newest round has no entry with `status` `open` and every commit of the round is in `approved`, the person approved the work. A round with no commits (answering with replies only leaves the range empty) has nothing to approve, so with no open entry it counts as approval too: the person can end it only with "Approve all and finish". Stop waiting, stop the server you started, and tell the person the commits are approved and ready for them to rebase and push. Otherwise start again at step 1.
+When the wait returns, check for approval first. The round's commits are `git log --format=%H <previous reviews[].head>..<newest reviews[].head>`, or all unpushed commits in the first round. If the newest round has no entry with `status` `open` and every commit of the round is in `approved`, the person approved the work. A round with no commits (answering with replies only leaves the range empty) has nothing to approve, so with no open entry it counts as approval too: the person can end it only with "Approve" or "Approve and push". Stop waiting, stop the server you started, and continue with "Push after approval". Otherwise start again at step 1.
+
+## Push after approval
+
+Both kinds of approval start the same way:
+
+1. If `~/.claude/skills/self-review/scripts/collect-gate.py` exists, run `python3 ~/.claude/skills/self-review/scripts/collect-gate.py --gate push`, which keeps the person's resolved comments.
+2. Check that `git rev-parse HEAD` equals the newest `reviews[].head`. If it does not, you committed after the approval, and those commits are unreviewed. Stop before rebasing and report it.
+3. Squash the fixup commits onto the base, the merge-base of HEAD with the upstream, else with the default branch: `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`. If the rebase conflicts, run `git rebase --abort`, stop and report it.
+4. Check that the rebased tree is the tree the person approved: `git diff --quiet <newest reviews[].head> HEAD` exits 0. If it does not, the rebase changed the result (it drops merge commits and any change made in them). Stop and report it.
+5. Run the repo's tests on the result.
+
+After "Approve" (the newest round has no `push`), tell the person the commits are squashed and tested, and push only when they say so.
+
+After "Approve and push" (the newest round has `"push": true`), push without asking if every check below passes. If one fails, do not push: stop and tell the person which check failed and why.
+
+1. No entry has `status` `open`.
+2. The branch is not the default branch and not a deploy branch. The default branch is `git symbolic-ref --short refs/remotes/origin/HEAD` without its `origin/` prefix. If that command fails, or HEAD is detached, this check fails. The repo's AGENTS.md lists its deploy branches on one line, `Deploy branches:` followed by the branch names in backticks, such as ``Deploy branches: `main`, `staging` ``. A repo with no such line counts as one where every branch deploys, so this check fails there.
+3. The rebase ran without conflicts.
+4. The HEAD check and the tree check above passed.
+5. The tests pass on the rebased result.
+
+Push only this branch, to a remote branch of the same name: `git push origin HEAD:refs/heads/<branch>`, with `-u` when the branch has no upstream. A bare `git push` can push other branches or a differently named upstream, depending on `push.default`. Never use `--force`: the rebase changed only unpushed commits, so a rejected push means the remote changed. Stop and report it. When the push succeeds, list the pushed commits.
 
 ## Rules
 
-- Write only `reply` on the entries and the top-level `summary`. Never change `status`, `body`, `quote`, `diff`, `sha`, `lines`, `id`, `created`, `reviews` or `approved`. The person resolves entries and approves commits ("Approve all and finish") in Diffsplainer.
+- Write only `reply` on the entries and the top-level `summary`. Never change `status`, `body`, `quote`, `diff`, `sha`, `lines`, `id`, `created`, `reviews` or `approved`. The person resolves entries and approves commits ("Approve" or "Approve and push") in Diffsplainer.
 - Keep every field you do not know, on every entry and at the top level.
 - Do not add, delete or reorder entries.
 - If the file is not valid JSON, do not write to it. Tell the person.
-- Never push, rebase or squash. Those happen only after the person approves and says so.
+- Never push, rebase or squash before the person approves. Then follow "Push after approval".

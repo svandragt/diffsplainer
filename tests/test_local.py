@@ -157,6 +157,22 @@ def test_a_reviewed_head_that_is_not_an_ancestor_is_ignored(repo):
     assert local.load(repo.path)["local"]["base"] == repo.base
 
 
+def test_a_reviewed_head_rewritten_to_the_same_tree_leaves_nothing_to_review(repo):
+    review.start_review(repo.path, repo.b)
+    repo.git("commit", "-q", "--amend", "-m", "Squashed")  # same tree, new sha: what an autosquash rebase leaves
+    data = local.load(repo.path)
+    assert data["local"]["base"] == data["local"]["head"]
+    assert data["local"]["commits"] == []
+
+
+def test_a_reviewed_head_rewritten_to_a_different_tree_is_ignored(repo):
+    review.start_review(repo.path, repo.b)
+    (repo.path / "new.txt").write_text("n\n")
+    repo.git("add", "-A")
+    repo.git("commit", "-q", "--amend", "-m", "Changed")
+    assert local.load(repo.path)["local"]["base"] == repo.base
+
+
 def test_a_reviewed_head_that_is_not_a_sha_is_ignored(repo):
     write_review(repo, reviews=[{"head": "--output=x", "at": "now"}])
     assert local.load(repo.path)["local"]["base"] == repo.base

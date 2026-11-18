@@ -134,6 +134,19 @@ def test_start_with_approve_over_http_approves_only_the_commits_up_to_the_head_t
     assert [r["head"] for r in got["reviews"]] == [local_repo.a]
 
 
+def test_start_with_approve_and_push_over_http_records_push_on_the_round(serve, local_repo):
+    assert post(serve, {"action": "start", "head": local_repo.b, "approve": True, "push": True})[0] == 200
+    assert review_file(local_repo)["reviews"][-1]["push"] is True
+
+
+@pytest.mark.parametrize("extra", [{"push": True}, {"approve": True, "push": "yes"}])
+def test_a_bad_push_over_http_is_a_400_and_writes_nothing(serve, local_repo, extra):
+    assert post(serve, {"action": "start", "head": local_repo.a})[0] == 200
+    before = review_file(local_repo)
+    assert post(serve, {"action": "start", "head": local_repo.b, **extra})[0] == 400
+    assert review_file(local_repo) == before
+
+
 def test_start_without_approve_over_http_approves_nothing(serve, local_repo):
     assert post(serve, {"action": "start", "head": local_repo.b})[0] == 200
     assert review_file(local_repo)["approved"] == []
