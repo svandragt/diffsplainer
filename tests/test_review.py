@@ -61,6 +61,25 @@ def test_start_with_approve_records_the_round_and_approves_every_commit_once(rep
     assert [r["head"] for r in got["reviews"]] == [repo.b] * 3
 
 
+def test_start_with_approve_and_push_records_push_on_the_round_and_approves(repo):
+    shas = [repo.a, repo.b]
+    review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True, "push": True}, shas)
+    got = read(repo)
+    assert got["reviews"][-1]["push"] is True
+    assert sorted(got["approved"]) == sorted(shas)
+
+
+def test_start_with_approve_alone_records_no_push_key(repo):
+    review.apply(repo.path, {"action": "start", "head": repo.b, "approve": True}, [repo.a, repo.b])
+    assert "push" not in read(repo)["reviews"][-1]
+
+
+def test_start_review_push_without_approve_is_a_value_error_and_writes_nothing(repo):
+    with pytest.raises(ValueError, match="Push needs approval"):
+        review.start_review(repo.path, repo.b, push=True)
+    assert not review.path(repo.path).exists()
+
+
 def test_start_with_approve_approves_only_the_commits_up_to_the_head_it_names(repo):
     review.apply(repo.path, {"action": "start", "head": repo.a, "approve": True}, [repo.a, repo.b])
     assert read(repo)["approved"] == [repo.a]
@@ -166,6 +185,8 @@ def test_resolving_an_entry_sets_its_status_and_leaves_the_rest(repo):
         {"action": "start", "head": ["x"]},
         {"action": "start"},
         {"action": "start", "head": "a" * 40, "approve": "yes"},  # approve is a boolean
+        {"action": "start", "head": "a" * 40, "push": True},  # push needs approve
+        {"action": "start", "head": "a" * 40, "approve": True, "push": "yes"},  # push is a boolean
         {"action": "start", "sha": "a" * 40},  # start names `head`
         {"action": "change", "sha": "a" * 40, "file": "f", "lines": "1", "diff": "d", "body": ""},
         {"action": "change", "sha": "a" * 40, "file": "f", "lines": 1, "diff": "d", "body": "x"},

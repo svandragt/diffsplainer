@@ -503,7 +503,7 @@ function renderReview() {
   const foot = h('div', 'finish');
   if (session.recorded) foot.append(h('p', null, session.recorded));
   else {
-    // One button ends the round: with open entries or a general comment it hands them to the agent, with none it approves every commit.
+    // The round ends here: with open entries or a general comment the first button hands them to the agent; with none it approves every commit, and the second button also lets the agent push.
     const label = h('label', 'lbl', 'General comment');
     const text = Object.assign(h('textarea'), { id: 'general', rows: 3, value: session.draft });
     label.htmlFor = text.id;
@@ -511,33 +511,38 @@ function renderReview() {
     general.append(label, text);
     box.append(general);
     const btn = button('', 'primary');
+    const pushBtn = button('Approve and push');
     const err = h('span', 'err');
     const count = () => open.length + (text.value.trim() ? 1 : 0);
     const sync = () => {
       session.draft = text.value; // the entry list redraws this panel and would drop what is typed
-      btn.textContent = count() ? `Send ${plural(count(), 'comment')} to agent` : 'Approve all and finish';
+      btn.textContent = count() ? `Send ${plural(count(), 'comment')} to agent` : 'Approve';
+      pushBtn.hidden = !!count();
     };
     text.addEventListener('input', sync);
     sync();
     btn.title = 'Records this HEAD, so the next run shows only commits after it';
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
+    pushBtn.title = 'Records this HEAD and lets the agent push once its checks pass';
+    const finish = (push) => async () => {
+      btn.disabled = pushBtn.disabled = true;
       const approve = !count();
       const note = text.value.trim() ? text.value : '';
-      const recorded = `${approve ? 'Approved' : 'Sent to the agent'}. The next run shows only new commits.`;
+      const recorded = `${approve ? (push ? 'Approved, push allowed' : 'Approved') : 'Sent to the agent'}. The next run shows only new commits.`;
       if (note) {
         session.draft = ''; // the redraw after the post shows the entry, not the draft
         try { await postReview({ action: 'change', sha: info.head, file: '', lines: '', diff: '', body: note }); } catch (e) {
           session.draft = note;
           err.textContent = e.message;
-          btn.disabled = false;
+          btn.disabled = pushBtn.disabled = false;
           return;
         }
       }
-      await act({ action: 'start', head: info.head, ...(approve && { approve }) }, $('.finish .err', box), () => reloadLocal(recorded));
-      btn.disabled = false;
-    });
-    foot.append(btn, err);
+      await act({ action: 'start', head: info.head, ...(approve && { approve }), ...(approve && push && { push }) }, $('.finish .err', box), () => reloadLocal(recorded));
+      btn.disabled = pushBtn.disabled = false;
+    };
+    btn.addEventListener('click', finish(false));
+    pushBtn.addEventListener('click', finish(true));
+    foot.append(btn, pushBtn, err);
   }
   box.append(foot);
 }

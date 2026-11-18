@@ -79,6 +79,9 @@ def ranges(repo: Path) -> tuple[str, str, str]:
     reviewed = review.last_head(review.read(repo))
     if reviewed and is_ancestor(repo, base, reviewed) and is_ancestor(repo, reviewed, head):
         base = reviewed
+    # A rebase that squashed the approved commits rewrote the reviewed head but left the tree: nothing new to review.
+    elif reviewed and run(repo, "diff", "--quiet", reviewed, head).returncode == 0:
+        base = head
     return merge_base, base, head
 
 

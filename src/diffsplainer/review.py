@@ -116,16 +116,19 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def start_review(repo: Path, head: str, approve: Iterable[str] | None = None) -> dict:
+def start_review(repo: Path, head: str, approve: Iterable[str] | None = None, push: bool = False) -> dict:
     """End a round: record `head`, and approve the commits in `approve` (None: approve nothing, an empty list: approve
     an empty round), in one write so the agent never sees one without the other. Approving while an entry is open
-    contradicts itself, so that is refused."""
+    contradicts itself, so that is refused. `push` records that the reviewer also allows the agent to push, so it
+    needs `approve`."""
+    if push and approve is None:
+        raise ValueError("Push needs approval")
 
     def change(d):
         approving = None if approve is None else list(approve)
         if approving is not None and any(isinstance(e, dict) and e.get("status") != "resolved" for e in d["entries"]):
             raise ValueError("Resolve the open comments before approving")
-        d["reviews"].append({"head": head, "at": _now()})
+        d["reviews"].append({"head": head, "at": _now(), **({"push": True} if push else {})})
         d["approved"].extend(s for s in approving or () if s not in d["approved"])
 
     return update(repo, change)
@@ -188,8 +191,11 @@ def apply(repo: Path, req, shas: list[str], head: str | None = None) -> dict:
         approve = req.get("approve", False)
         if not isinstance(approve, bool):
             raise ValueError("approve must be true or false")
+        push = req.get("push", False)
+        if not isinstance(push, bool):
+            raise ValueError("push must be true or false")
         shown = shas[: shas.index(sha) + 1] if sha in shas else []  # empty range: nothing to approve
-        return start_review(repo, sha, shown if approve else None)
+        return start_review(repo, sha, shown if approve else None, push)
     fields = {k: req.get(k) for k in _ENTRY_FIELDS}
     if not all(isinstance(v, str) for v in fields.values()) or not fields["body"].strip():
         raise ValueError("file, lines, diff and body must be strings, and body must not be empty")
