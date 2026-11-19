@@ -125,9 +125,10 @@ Both kinds of approval start the same way:
 
 1. If `~/.claude/skills/self-review/scripts/collect-gate.py` exists, run `python3 ~/.claude/skills/self-review/scripts/collect-gate.py --gate push`, which keeps the person's resolved comments.
 2. Check that `git rev-parse HEAD` equals the newest `reviews[].head`. If it does not, you committed after the approval, and those commits are unreviewed. Stop before rebasing and report it.
-3. Squash the fixup commits onto the base, the merge-base of HEAD with the upstream, else with the default branch: `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`. If the rebase conflicts, run `git rebase --abort`, stop and report it.
-4. Check that the rebased tree is the tree the person approved: `git diff --quiet <newest reviews[].head> HEAD` exits 0. If it does not, the rebase changed the result (it drops merge commits and any change made in them). Stop and report it.
-5. Run the repo's tests on the result.
+3. Check that `git rev-list --count --min-parents=2 <base>..HEAD` prints `0`. If it does not, the branch has a merge commit. The rebase in the next step would flatten it, and would copy any merged commits that are not on the upstream yet, such as another unpushed branch. Stop before rebasing and report it.
+4. Squash the fixup commits onto the base, the merge-base of HEAD with the upstream, else with the default branch: `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`. If the rebase conflicts, run `git rebase --abort`, stop and report it.
+5. Check that the rebased tree is the tree the person approved: `git diff --quiet <newest reviews[].head> HEAD` exits 0. If it does not, the rebase changed the result. Stop and report it.
+6. Run the repo's tests on the result.
 
 After "Approve" (the newest round has no `push`), tell the person the commits are squashed and tested, and push only when they say so.
 
@@ -136,7 +137,7 @@ After "Approve and push" (the newest round has `"push": true`), push without ask
 1. No entry has `status` `open`.
 2. The branch is not the default branch and not a deploy branch. The default branch is `git symbolic-ref --short refs/remotes/origin/HEAD` without its `origin/` prefix. If that command fails, or HEAD is detached, this check fails. The repo's AGENTS.md lists its deploy branches on one line, `Deploy branches:` followed by the branch names in backticks, such as ``Deploy branches: `main`, `staging` ``. A repo with no such line counts as one where every branch deploys, so this check fails there.
 3. The rebase ran without conflicts.
-4. The HEAD check and the tree check above passed.
+4. The HEAD, merge-commit and tree checks above passed.
 5. The tests pass on the rebased result.
 
 Push only this branch, to a remote branch of the same name: `git push origin HEAD:refs/heads/<branch>`, with `-u` when the branch has no upstream. A bare `git push` can push other branches or a differently named upstream, depending on `push.default`. Never use `--force`: the rebase changed only unpushed commits, so a rejected push means the remote changed. Stop and report it. When the push succeeds, list the pushed commits.
