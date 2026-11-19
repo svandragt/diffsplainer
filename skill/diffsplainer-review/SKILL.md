@@ -125,8 +125,8 @@ Both kinds of approval start the same way:
 
 1. If `~/.claude/skills/self-review/scripts/collect-gate.py` exists, run `python3 ~/.claude/skills/self-review/scripts/collect-gate.py --gate push`, which keeps the person's resolved comments.
 2. Check that `git rev-parse HEAD` equals the newest `reviews[].head`. If it does not, you committed after the approval, and those commits are unreviewed. Stop before rebasing and report it.
-3. Check that `git rev-list --count --min-parents=2 <base>..HEAD` prints `0`. If it does not, the branch has a merge commit. The rebase in the next step would flatten it, and would copy any merged commits that are not on the upstream yet, such as another unpushed branch. Stop before rebasing and report it.
-4. Squash the fixup commits onto the base, the merge-base of HEAD with the upstream, else with the default branch: `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`. If the rebase conflicts, run `git rebase --abort`, stop and report it.
+3. Find the base, the merge-base of HEAD with the upstream, else with the default branch. Check that `git rev-list --count --min-parents=2 <base>..HEAD` prints `0`. If it does not, the branch has a merge commit. The rebase in the next step would flatten it, and would copy any merged commits that are not on the upstream yet, such as another unpushed branch. Stop before rebasing and report it.
+4. Squash the fixup commits onto the base: `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`. If the rebase conflicts, run `git rebase --abort`, stop and report it.
 5. Check that the rebased tree is the tree the person approved: `git diff --quiet <newest reviews[].head> HEAD` exits 0. If it does not, the rebase changed the result. Stop and report it.
 6. Run the repo's tests on the result.
 
