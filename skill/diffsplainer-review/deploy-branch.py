@@ -51,7 +51,7 @@ def workflow_matching(branch):
 
 def refusal(branch):
     """Why `branch` must not be pushed, or None. Raises when a check cannot run."""
-    if branch in DEPLOY_NAMES or branch.endswith("-built"):
+    if branch.lower() in DEPLOY_NAMES or branch.lower().endswith("-built"):
         return f"{branch} is a deploy branch name"
     override = Path(out("git", "rev-parse", "--git-common-dir")).resolve() / "info" / "deploy-branches"
     if override.is_file() and branch in {s.strip() for s in override.read_text().splitlines()}:

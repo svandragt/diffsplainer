@@ -138,7 +138,7 @@ After "Approve and push" (the newest round has `"push": true`), push without ask
 2. From the repo root, `uv run <this skill's directory>/deploy-branch.py <branch>` exits 0, where `<branch>` is the output of `git branch --show-current`. If that prints nothing, HEAD is detached and this check fails. If the script exits 1, tell the person the reason it prints. The script refuses in these cases:
    - The branch is the default branch, or GitHub lists it as protected.
    - A workflow's `on.push.branches` lists the branch, or lists a glob or a `!` pattern, which matches every branch.
-   - The branch is `production`, `preprod`, `staging`, `develop`, `master` or `main`, or its name ends in `-built`.
+   - The branch is `production`, `preprod`, `staging`, `develop`, `master` or `main`, or its name ends in `-built`, in any letter case.
    - The person named the branch in `info/deploy-branches` in the repo's git common directory (`git rev-parse --git-common-dir`). The file lists one branch per line and is never committed.
    - It cannot check: the GitHub API fails, `origin` is not on GitHub, or a workflow file does not parse.
 3. The rebase ran without conflicts.
