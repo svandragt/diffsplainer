@@ -42,10 +42,13 @@ def check(tmp_path, monkeypatch):
         gh_fails=False,
         workflows=None,
         override=None,
+        push_urls=(),
     ):
         if not path.exists():  # a test may run the script for several branches in one repo
             subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
             subprocess.run(["git", "remote", "add", "origin", remote], cwd=path, check=True)
+            for url in push_urls:
+                subprocess.run(["git", "remote", "set-url", "--add", "--push", "origin", url], cwd=path, check=True)
             for name, text in (workflows or {}).items():
                 (path / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
                 (path / ".github" / "workflows" / name).write_text(text)
@@ -188,3 +191,26 @@ def test_a_deploy_name_is_refused_even_when_github_reports_nothing(check, branch
 @pytest.mark.parametrize("branch", ["development", "1326-fix-development", "built", "built-x", "main2"])
 def test_a_branch_that_only_resembles_a_deploy_name_passes(check, branch):
     assert check(branch, default="trunk").returncode == 0
+
+
+@pytest.mark.parametrize("name", ["on", "yes", "off", "0123"])
+def test_a_yaml_1_1_scalar_in_on_push_branches_still_refuses_the_branch(check, name):
+    done = check(name, workflows={"w.yml": push_on(f"branches: [{name}]")})
+    assert done.returncode == 1
+    assert "workflow w.yml" in done.stderr
+
+
+def test_a_push_url_that_is_not_github_refuses_the_branch(check):
+    done = check("fix-x", push_urls=["https://example.com/x/y.git"])
+    assert done.returncode == 1
+    assert done.stderr.startswith("error")
+
+
+def test_a_github_push_url_is_read(check):
+    assert check("fix-x", push_urls=["https://github.com/o/r.git"]).returncode == 0
+
+
+def test_more_than_one_push_url_refuses_the_branch(check):
+    done = check("fix-x", push_urls=["https://github.com/o/r.git", "https://github.com/o/s.git"])
+    assert done.returncode == 1
+    assert "more than one push URL" in done.stderr

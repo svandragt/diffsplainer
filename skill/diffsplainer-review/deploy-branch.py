@@ -22,7 +22,10 @@ def out(*cmd):
 
 
 def github_repo():
-    url = out("git", "remote", "get-url", "origin")
+    urls = out("git", "remote", "get-url", "--push", "--all", "origin").splitlines()
+    if len(urls) != 1:
+        raise ValueError("origin has more than one push URL")
+    url = urls[0]
     if not (m := re.search(r"(?:@|//)github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$", url)):
         raise ValueError(f"origin is not a GitHub remote: {url}")
     return f"{m[1]}/{m[2]}"
@@ -33,12 +36,12 @@ def workflow_matching(branch):
     workflows = Path(out("git", "rev-parse", "--show-toplevel")) / ".github" / "workflows"
     for path in sorted(p for p in workflows.glob("*") if p.suffix in (".yml", ".yaml")):
         try:
-            doc = yaml.safe_load(path.read_text())
+            doc = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
             if not isinstance(doc, dict):
                 raise TypeError("not a mapping")
         except (yaml.YAMLError, TypeError) as e:
             raise ValueError(f"cannot read workflow {path.name}: {' '.join(str(e).split())}") from e
-        on = doc.get("on", doc.get(True))  # PyYAML reads a bare `on:` key as True
+        on = doc.get("on")
         push = on.get("push") if isinstance(on, dict) else None
         patterns = push.get("branches") if isinstance(push, dict) else None
         for p in [patterns] if isinstance(patterns, str) else patterns or []:
