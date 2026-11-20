@@ -4,7 +4,7 @@ Guidance to coding agents working in this repository.
 
 ## Project
 
-diffsplainer is a GitHub PR review app. It shows a PR's diff as chunks, with an explanation from a headless Claude Code run next to each chunk. At runtime the backend uses only the Python 3.11+ standard library. The browser UI is plain HTML, CSS and JavaScript in `src/diffsplainer/static/`. pytest and ruff are the dev dependencies, in the `dev` group. Do not add runtime dependencies.
+diffsplainer is a GitHub PR review app. It shows a PR's diff as chunks, with an explanation from a headless Claude Code run next to each chunk. At runtime the backend uses only the Python 3.11+ standard library. The browser UI is plain HTML, CSS and JavaScript in `src/diffsplainer/static/`. pytest, ruff and PyYAML are the dev dependencies, in the `dev` group; PyYAML is only for the tests of `skill/diffsplainer-review/deploy-branch.py`, which declares it in its own `uv run` header. Do not add runtime dependencies.
 
 ## Commands
 
@@ -15,7 +15,7 @@ diffsplainer is a GitHub PR review app. It shows a PR's diff as chunks, with an 
 
 ## Tests
 
-Write or change the test first and see it fail before you change the code. Tests live in `tests/` and replace GitHub (`diffsplainer.github` functions) and Claude (`explain_file`, `explain_overview`, `explain_term`) with fakes. Tests of local review run against a temporary git repository with a bare upstream (the `repo` fixture in `tests/conftest.py`); they replace Claude, and GitHub where a test covers related PRs. Tests of `run_claude` point `CLAUDE_BIN` at `tests/fake_claude.py`, which records its arguments, working directory and environment and answers each schema the app sends (term, chunk batch, overview) with fake text. They never call the network or the real `claude` CLI. Browser checks can run the app with `CLAUDE_BIN=$PWD/tests/fake_claude.py` to avoid real Claude calls.
+Write or change the test first and see it fail before you change the code. Tests live in `tests/` and replace GitHub (`diffsplainer.github` functions) and Claude (`explain_file`, `explain_overview`, `explain_term`) with fakes. Tests of local review run against a temporary git repository with a bare upstream (the `repo` fixture in `tests/conftest.py`); they replace Claude, and GitHub where a test covers related PRs. Tests of `run_claude` point `CLAUDE_BIN` at `tests/fake_claude.py`, which records its arguments, working directory and environment and answers each schema the app sends (term, chunk batch, overview) with fake text. Tests of `deploy-branch.py` run it as a subprocess against a temporary repository, with a fake `gh` first on `PATH`. They never call the network or the real `claude` CLI. Browser checks can run the app with `CLAUDE_BIN=$PWD/tests/fake_claude.py` to avoid real Claude calls.
 
 ## Dependency updates
 
@@ -33,8 +33,6 @@ Dependabot opens weekly grouped updates for GitHub Actions and uv. Patch and min
 - `static/vendor/` holds the vendored Prism (`prism.js`) and its licence (`prism-LICENSE.txt`).
 
 ## Releasing
-
-Deploy branches: `main`
 
 1. Bump `version` in `pyproject.toml`.
 2. Merge the change to `main`.

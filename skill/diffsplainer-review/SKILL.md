@@ -135,7 +135,12 @@ After "Approve" (the newest round has no `push`), tell the person the commits ar
 After "Approve and push" (the newest round has `"push": true`), push without asking if every check below passes. If one fails, do not push: stop and tell the person which check failed and why.
 
 1. No entry has `status` `open`.
-2. The branch is not the default branch and not a deploy branch. The default branch is `git symbolic-ref --short refs/remotes/origin/HEAD` without its `origin/` prefix. If that command fails, or HEAD is detached, this check fails. The repo's AGENTS.md lists its deploy branches on one line, `Deploy branches:` followed by the branch names in backticks, such as ``Deploy branches: `main`, `staging` ``. A repo with no such line counts as one where every branch deploys, so this check fails there.
+2. From the repo root, `uv run <this skill's directory>/deploy-branch.py <branch>` exits 0, where `<branch>` is the output of `git branch --show-current`. If that prints nothing, HEAD is detached and this check fails. If the script exits 1, tell the person the reason it prints. The script refuses in these cases:
+   - The branch is the default branch, or GitHub lists it as protected.
+   - A workflow's `on.push.branches` lists the branch, or lists a glob or a `!` pattern, which matches every branch.
+   - The branch is `production`, `preprod`, `staging`, `develop`, `master` or `main`, or its name ends in `-built`.
+   - The person named the branch in `info/deploy-branches` in the repo's git common directory (`git rev-parse --git-common-dir`). The file lists one branch per line and is never committed.
+   - It cannot check: the GitHub API fails, `origin` is not on GitHub, or a workflow file does not parse.
 3. The rebase ran without conflicts.
 4. The HEAD, merge-commit and tree checks above passed.
 5. The tests pass on the rebased result.
