@@ -1,5 +1,6 @@
 import re
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -81,3 +82,9 @@ def test_index_has_a_wrap_toggle_checked_by_default():
     tag = re.search(r"<input\b[^>]*\bid=\"wrap\"[^>]*>", html)
     assert tag and 'type="checkbox"' in tag.group(0) and re.search(r"\bchecked\b", tag.group(0))
     assert "body.wrap .diff td.s" in (server.STATIC / "style.css").read_text()
+
+
+def test_skill_shell_has_no_positional_parameters():
+    # Claude Code replaces $1, $2 and $ARGUMENTS in a skill body with the skill's arguments.
+    skill = (Path(__file__).parent.parent / "skill" / "diffsplainer-review" / "SKILL.md").read_text()
+    assert re.findall(r"\$(?:\d|ARGUMENTS\b|\{\d)", skill) == []
