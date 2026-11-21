@@ -18,7 +18,10 @@ GLOB = re.compile(r"[*?\[+]")
 
 
 def out(*cmd):
-    return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
+    done = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if done.returncode:
+        raise RuntimeError(f"{' '.join(cmd[:2])} failed: {done.stderr.strip() or f'exit {done.returncode}'}")
+    return done.stdout.strip()
 
 
 def github_repo():

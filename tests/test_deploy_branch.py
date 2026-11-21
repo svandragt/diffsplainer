@@ -10,7 +10,7 @@ SCRIPT = Path(__file__).parent.parent / "skill" / "diffsplainer-review" / "deplo
 # Stands in for `gh api`: FAKE_GH_FAIL makes it fail, FAKE_GH_PROTECTED is the protected branch list and
 # FAKE_GH_DEFAULT the default branch.
 FAKE_GH = """#!/bin/sh
-[ -n "$FAKE_GH_FAIL" ] && exit 1
+[ -n "$FAKE_GH_FAIL" ] && { echo "HTTP 401: Bad credentials" >&2; exit 1; }
 case "$*" in
   *protected=true*) printf '%s' "$FAKE_GH_PROTECTED" ;;
   *) echo "$FAKE_GH_DEFAULT" ;;
@@ -52,9 +52,9 @@ def check(tmp_path, monkeypatch):
             for name, text in (workflows or {}).items():
                 (path / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
                 (path / ".github" / "workflows" / name).write_text(text)
-            if override is not None:
-                (path / ".git" / "info").mkdir(exist_ok=True)
-                (path / ".git" / "info" / "deploy-branches").write_text(override)
+        if override is not None:
+            (path / ".git" / "info").mkdir(exist_ok=True)
+            (path / ".git" / "info" / "deploy-branches").write_text(override)
         env = {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -177,6 +177,11 @@ def test_a_branch_in_the_override_file_is_refused(check):
 def test_the_override_file_adds_refusals_only(check):
     assert check("fix-x", override="# nothing\n\n").returncode == 0
     assert check("main", override="other\n").returncode == 1
+    assert check("other", override="other\n").returncode == 1
+
+
+def test_a_github_failure_shows_the_reason_gh_gave(check):
+    assert "Bad credentials" in check("fix-x", gh_fails=True).stderr
 
 
 @pytest.mark.parametrize(
