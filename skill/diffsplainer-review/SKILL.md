@@ -83,13 +83,14 @@ Then check that the plan exists: the file `plan` names, else `approach/<branch>.
 ```sh
 gd="$(git rev-parse --absolute-git-dir)"; mkdir -p "$gd/diffsplainer"
 if command -v diffsplainer >/dev/null; then app=diffsplainer; else app="uvx diffsplainer"; fi
-up() { curl -sf --max-time 1 -o /dev/null "http://localhost:$1/api/version"; }
+# up reads $port, not an argument: Claude Code replaces positional parameters in a skill.
+up() { curl -sf --max-time 1 -o /dev/null "http://localhost:$port/api/version"; }
 for port in $(seq 3000 3020); do
-  up $port && continue # a server already answers on this port
+  up && continue # a server already answers on this port
   PORT=$port nohup $app --local >"$gd/diffsplainer/server.log" 2>&1 &
   pid=$!
   for _ in $(seq 40); do # up to 20 s: the first uvx run installs the package
-    up $port && { echo $pid >"$gd/diffsplainer/server.pid"; echo "http://localhost:$port"; break 2; }
+    up && { echo $pid >"$gd/diffsplainer/server.pid"; echo "http://localhost:$port"; break 2; }
     kill -0 $pid 2>/dev/null || break # the process exited, so the port is busy
     sleep 0.5
   done
