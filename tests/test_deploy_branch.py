@@ -180,7 +180,20 @@ def test_the_override_file_adds_refusals_only(check):
 
 
 @pytest.mark.parametrize(
-    "branch", ["production", "preprod", "staging", "develop", "master", "main", "develop-built", "x-built", "Production", "STAGING", "Develop-Built"]
+    "branch",
+    [
+        "production",
+        "preprod",
+        "staging",
+        "develop",
+        "master",
+        "main",
+        "develop-built",
+        "x-built",
+        "Production",
+        "STAGING",
+        "Develop-Built",
+    ],
 )
 def test_a_deploy_name_is_refused_even_when_github_reports_nothing(check, branch):
     done = check(branch, default="trunk")
