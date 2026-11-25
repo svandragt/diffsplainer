@@ -388,10 +388,11 @@ async function loadLocal(seq, recorded = '') {
   if (!res || res.status === 404) return seq === loadSeq && setApp(emptyHtml);
   const data = await res.json().catch(() => ({ error: `Error ${res.status}` })); // #app stays hidden until a setApp
   if (seq !== loadSeq) return;
-  document.title = `${data.local?.summary?.title ?? 'Unpushed commits'} · Diffsplainer`;
+  document.title = localTitle(data);
   if (!res.ok) return setApp(`<div class="card">Could not load the commits: ${esc(data.error)}</div>`);
   renderLocal(data, recorded);
 }
+const localTitle = (data) => `${data.local?.summary?.title ?? 'Unpushed commits'} · Diffsplainer`;
 
 // The top of the page: the repository and branch, then the agent's summary of the work. Without a summary, the commit count.
 function renderAbout(info, count) {
@@ -460,8 +461,41 @@ function reloadLocal(recorded) {
   const seq = ++loadSeq;
   if (source) source.close();
   source = null;
-  loadLocal(seq, recorded);
+  return loadLocal(seq, recorded);
 }
+
+// After "Send N comments to agent", the page checks every WATCH_MS until the agent has replied to each entry in `ids`.
+// The agent commits its fixups first and writes all replies last (skill/diffsplainer-review), so the replies mean it is done.
+// Then the page shows the new range, and if it does not have focus, the tab title gets BADGE until the window is focused.
+const WATCH_MS = 5000;
+const BADGE = '● ';
+function watchAgent(ids) {
+  const seq = loadSeq;
+  let replied = false;
+  const answered = (entries) => ids.every((id) => {
+    const e = entries.find((x) => x?.id === id);
+    return !e || e.reply != null || e.status === 'resolved'; // an entry that is gone has nothing left to wait for
+  });
+  const check = async () => {
+    const res = await fetch('/api/local').catch(() => null);
+    const data = res?.ok ? await res.json().catch(() => null) : null;
+    if (seq !== loadSeq) return; // another load replaced this page
+    if (!data?.local || !Array.isArray(data.review?.entries) || !answered(data.review.entries)) return setTimeout(check, WATCH_MS);
+    // `/api/local` reads git before the review file, so this answer can pair the replies with the HEAD before the fixups.
+    // A request that starts after the replies were seen also sees the commits made before them.
+    if (!replied) {
+      replied = true;
+      return check();
+    }
+    loadSeq++;
+    if (source) source.close(); // a range with commits when the round was sent can still be streaming
+    source = null;
+    document.title = (document.hasFocus() ? '' : BADGE) + localTitle(data);
+    renderLocal(data, ''); // without the confirmation, as a reload by hand, so a reply-only round gets its buttons back
+  };
+  setTimeout(check, WATCH_MS);
+}
+window.addEventListener('focus', () => { if (document.title.startsWith(BADGE)) document.title = document.title.slice(BADGE.length); });
 
 function renderCommits() {
   const box = $('#commits');
@@ -537,7 +571,10 @@ function renderReview() {
           return;
         }
       }
-      await act({ action: 'start', head: info.head, ...(approve && { approve }), ...(approve && push && { push }) }, $('.finish .err', box), () => reloadLocal(recorded));
+      await act({ action: 'start', head: info.head, ...(approve && { approve }), ...(approve && push && { push }) }, $('.finish .err', box), () => {
+        const sent = session.review.entries.filter((e) => e?.status !== 'resolved' && e?.reply == null).map((e) => e.id);
+        reloadLocal(recorded).then(() => approve || !sent.length || watchAgent(sent)); // the agent answers only entries without a reply
+      });
       btn.disabled = pushBtn.disabled = false;
     };
     btn.addEventListener('click', finish(false));
