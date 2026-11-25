@@ -461,7 +461,7 @@ function reloadLocal(recorded) {
   const seq = ++loadSeq;
   if (source) source.close();
   source = null;
-  return loadLocal(seq, recorded);
+  return loadLocal(seq, recorded).then(() => seq);
 }
 
 // After "Send N comments to agent", the page checks every WATCH_MS until the agent has replied to each entry in `ids`.
@@ -573,7 +573,8 @@ function renderReview() {
       }
       await act({ action: 'start', head: info.head, ...(approve && { approve }), ...(approve && push && { push }) }, $('.finish .err', box), () => {
         const sent = session.review.entries.filter((e) => e?.status !== 'resolved' && e?.reply == null).map((e) => e.id);
-        reloadLocal(recorded).then(() => approve || !sent.length || watchAgent(sent)); // the agent answers only entries without a reply
+        // the agent answers only entries without a reply; a newer load (another page) cancels the wait
+        reloadLocal(recorded).then((seq) => seq === loadSeq && !approve && sent.length && watchAgent(sent));
       });
       btn.disabled = pushBtn.disabled = false;
     };
