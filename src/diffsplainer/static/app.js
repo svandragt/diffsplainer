@@ -491,7 +491,12 @@ function watchAgent(ids) {
     if (source) source.close(); // a range with commits when the round was sent can still be streaming
     source = null;
     document.title = (document.hasFocus() ? '' : BADGE) + localTitle(data);
+    const { draft } = session; // the General comment box shows during the wait when the agent committed before the Send
     renderLocal(data, ''); // without the confirmation, as a reload by hand, so a reply-only round gets its buttons back
+    if (draft) {
+      session.draft = draft;
+      renderReview();
+    }
   };
   setTimeout(check, WATCH_MS);
 }
